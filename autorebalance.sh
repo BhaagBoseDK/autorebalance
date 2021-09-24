@@ -1,0 +1,99 @@
+#!/bin/bash
+# ------------------------------------------------------------------------------------------------
+# Usage:
+# This script run continuously to attempt to create a balanced node.
+# The main idea is to keep minimial liquidity on each channel to at least route some payments.
+# The user is expected to customise the script with respect to fees and other parameters. These are
+# Available to edit on top of the script. 
+#
+# It can be executed in a TMUX session continuously as 
+# while true; do . <path_to_script>/autorebalance.sh; done
+# Or
+# It can be executed as a daily cron job.
+#
+# BOS (Balance of Satoshi) needs to be installed
+#
+# Add the following in crontab to run regulary. Change path as appropriate
+# 42 21 * * * <path_to_script>/autorebalance.sh >> ~/autorebalance.log 2>&1
+# Version: 0.0.1
+# Author:  VS https://t.me/BhaagBoseDk 
+#
+# ------------------------------------------------------------------------------------------------
+#
+
+
+# Change These Parameters as per your requirements
+
+# your public key
+MY_KEY=03c5528c628681aa17ab9e117aa3ee6f06c750dfb17df758ecabcd68f1567ad8c1
+# Max_Fee is kept as high since we will control the rebalance with fee-rate. Change if reuired.
+MAX_FEE=50000
+
+# Max Fee you want to pay for rebalance.
+MAX_FEE_RATE=299
+
+# Fee used to avoid expensive channels into you.
+LIMIT_FEE_RATE=299
+
+# Consider these channels for increasing local balance when outbound is below this limit
+OUTBOUND_BELOW=1000000
+
+# Target rebalance to this capacity of Local. Keep this below 0.5 (50%)
+IN_TARGET_OUTBOUND=0.2
+
+# Peers to be omitted from outbound remabalancing. Add to --omit pubkey --omit pubkey syntax. If not specified all peers are considered
+OMIT=" "
+
+
+# ------------ START OF SCRIPT ------------
+
+echo "========= START UP ==========="
+date
+
+echo "Ensure Some Local if channel is < 1_000_000"
+
+#Get all peers. You can add  
+
+bos peers --no-color --complete --sort inbound_liquidity $OMIT \
+| grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}' > ./sendout_tmp 
+
+#Get all low outbound channels.
+bos peers --no-color --complete --outbound-below $OUTBOUND_BELOW --sort outbound_liquidity | grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}' > ./bringin ;
+
+#Get unique list of nodes which can be used for rebalance (must have larger outbound)
+sendout_arr=(`cat ./bringin ./sendout_tmp | sort | uniq -u`)
+
+if [ ${#sendout_arr[@]} -eq 0 ] 
+then
+ echo "Error -1 : No outbound peers available for rebalance. Consider lowering OUTBOUND_BELOW from "$OUTBOUND_BELOW
+ exit -1
+fi
+
+# Avoid the nodes which are alreayd depleted from rebalancing
+AVOID=" "
+for i in `cat ./bringin`
+ do AVOID=" --avoid $MY_KEY/$i $AVOID";
+ done
+
+#echo $AVOID
+
+# Rebalance with a random outbound node 
+for i in `cat ./bringin`; do \
+ j=$(($RANDOM % ${#sendout_arr[@]}));
+ #Select A random out peer
+ OUT=${sendout_arr[j]};
+
+ echo -e "\n out------> "$OUT"\n"; 
+ echo -e "\n in-------> "$i"\n";
+
+ bos rebalance --in $i --out $OUT --in-target-outbound CAPACITY*$IN_TARGET_OUTBOUND --avoid "FEE_RATE>$LIMIT_FEE_RATE/$i" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
+ date; sleep 30;\
+done
+
+#Cleanup
+rm -f ./bringin ./sendout_tmp
+
+echo Final Sleep
+date; 
+echo "========= SLEEP ========"
+sleep 600
