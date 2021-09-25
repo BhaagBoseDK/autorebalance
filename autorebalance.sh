@@ -15,14 +15,18 @@
 #
 # Add the following in crontab to run regulary. Change path as appropriate
 # 42 21 * * * <path_to_script>/autorebalance.sh >> ~/autorebalance.log 2>&1
-# Version: 0.0.1
+# Version: 0.0.2
 # Author:  VS https://t.me/BhaagBoseDk 
-#
+# 0.0.1 - first version
+# 0.0.2 - Added Tip for fun
 # ------------------------------------------------------------------------------------------------
 #
 
 
 # Change These Parameters as per your requirements
+
+#If you DO NOT wish to tip 1 sat to author each time you run this script make this value 0. If you wish to increase the tip, change to whatever you want. 
+TIP=1
 
 # your public key
 MY_KEY=03c5528c628681aa17ab9e117aa3ee6f06c750dfb17df758ecabcd68f1567ad8c1
@@ -46,7 +50,6 @@ OMIT=" "
 
 
 # ------------ START OF SCRIPT ------------
-
 echo "========= START UP ==========="
 date
 
@@ -93,6 +96,13 @@ done
 #Cleanup
 rm -f ./bringin ./sendout_tmp
 
+#Tip Author
+if [ $TIP -ne 0 ]
+then
+ echo "Thank you..."
+ bos send 03c5528c628681aa17ab9e117aa3ee6f06c750dfb17df758ecabcd68f1567ad8c1 --amount $TIP --message "Thank you from $MY_KEY"
+fi
+ 
 echo Final Sleep
 date; 
 echo "========= SLEEP ========"
