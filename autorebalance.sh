@@ -19,6 +19,7 @@
 # Author:  VS https://t.me/BhaagBoseDk 
 # 0.0.1 - first version
 # 0.0.2 - Added Tip for fun
+# 0.0.3 - Handling various bos instllations
 # ------------------------------------------------------------------------------------------------
 #
 
@@ -45,11 +46,43 @@ OUTBOUND_BELOW=1000000
 # Target rebalance to this capacity of Local. Keep this below 0.5 (50%)
 IN_TARGET_OUTBOUND=0.2
 
+#If you run bos in a specific manner or have alias defined for bos, type the same here and uncomment the line (replace #myBOS= by myBOS= and provide your bos path)
+#myBOS="your installation specific way to run bos"
+
+# ------------ START OF SCRIPT ------------
+#Set possible BOS paths
+
+if [ -f $HOME/.npm-global/bin/bos ] 
+then
+        BOS="$HOME/.npm-global/bin/bos"
+else
+        BOS=`which bos`
+fi
+
+if [ "$BOS" == "" ] || [ ! -f $BOS ]
+then
+	if [ "`uname -a | grep umbrel`" != "" ]
+        then 
+		# Potential Docker Installation on umbrel
+		BOS="docker run --rm --network=host --add-host=umbrel.local:10.21.21.9 -v $HOME/.bos:/home/node/.bos -v $HOME/umbrel/lnd:/home/node/.lnd:ro alexbosworth/balanceofsatoshis"
+	else
+		#Other installations
+		BOS="docker run --rm --network="generated_default" -v $HOME/.bos:/home/node/.bos alexbosworth/balanceofsatoshis balance"
+	fi
+fi
+
+if [ "$myBOS" != "" ]
+then
+	BOS=$myBOS
+fi
+
+echo "BOS is $BOS"
+
+#BOS=user_specific_path for bos
+
 # Peers to be omitted from outbound remabalancing. Add to --omit pubkey --omit pubkey syntax. If not specified all peers are considered
 OMIT=" "
 
-
-# ------------ START OF SCRIPT ------------
 echo "========= START UP ==========="
 date
 
@@ -57,11 +90,11 @@ echo "Ensure Some Local if channel is < 1_000_000"
 
 #Get all peers. You can add  
 
-bos peers --no-color --complete --sort inbound_liquidity $OMIT \
+$BOS peers --no-color --complete --sort inbound_liquidity $OMIT \
 | grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}' > ./sendout_tmp 
 
 #Get all low outbound channels.
-bos peers --no-color --complete --outbound-below $OUTBOUND_BELOW --sort outbound_liquidity | grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}' > ./bringin ;
+$BOS peers --no-color --complete --outbound-below $OUTBOUND_BELOW --sort outbound_liquidity | grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}' > ./bringin ;
 
 #Get unique list of nodes which can be used for rebalance (must have larger outbound)
 sendout_arr=(`cat ./bringin ./sendout_tmp | sort | uniq -u`)
@@ -89,7 +122,7 @@ for i in `cat ./bringin`; do \
  echo -e "\n out------> "$OUT"\n"; 
  echo -e "\n in-------> "$i"\n";
 
- bos rebalance --in $i --out $OUT --in-target-outbound CAPACITY*$IN_TARGET_OUTBOUND --avoid "FEE_RATE>$LIMIT_FEE_RATE/$i" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
+ $BOS rebalance --in $i --out $OUT --in-target-outbound CAPACITY*$IN_TARGET_OUTBOUND --avoid "FEE_RATE>$LIMIT_FEE_RATE/$i" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
  date; sleep 30;\
 done
 
@@ -100,7 +133,7 @@ rm -f ./bringin ./sendout_tmp
 if [ $TIP -ne 0 ]
 then
  echo "Thank you..."
- bos send 03c5528c628681aa17ab9e117aa3ee6f06c750dfb17df758ecabcd68f1567ad8c1 --amount $TIP --message "Thank you from $MY_KEY"
+ $BOS send 03c5528c628681aa17ab9e117aa3ee6f06c750dfb17df758ecabcd68f1567ad8c1 --amount $TIP --message "Thank you from $MY_KEY"
 fi
  
 echo Final Sleep

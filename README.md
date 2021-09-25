@@ -14,13 +14,13 @@ Test it using
 cd <path_to_script> 
 
 . ./autorebalance.sh 
+
 </code>
 
 Then run continuously if you are comfortable.
 	
 <code>
 	while true; do . <path_to_script>/autorebalance.sh; done
-
 </code>
   
   
@@ -28,11 +28,14 @@ Or, it can be executed as a daily cron job. BOS (Balance of Satoshi) needs to be
 
 <code>
 	42 21 * * * <path_to_script>/autorebalance.sh >> ~/autorebalance.log 2>&1
-
 </code>
 
 Change TIP=0 if you do not wish to tip the author.
+
+You may have to configure myBOS variable if the script is unable to determine bos installation.
 	
-Version: 0.0.2
+Version: 0.0.3
+
+Contact on telegram if there are issues running the script.
 	
 Author:  VS https://t.me/BhaagBoseDk 
