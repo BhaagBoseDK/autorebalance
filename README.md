@@ -7,6 +7,7 @@ Usage:
 
 This script run continuously to attempt to create a balanced node. The main idea is to keep minimial liquidity on each channel to at least route some payments. The user is expected to customise the script with respect to fees and other parameters. These are available to edit on top of the script.  It can be executed in a TMUX session continuously as:
 
+
 Test it using
 
 <code>
@@ -30,6 +31,8 @@ Or, it can be executed as a daily cron job. BOS (Balance of Satoshi) needs to be
 
 </code>
 
-Version: 0.0.1
+Change TIP=0 if you do not wish to tip the author.
+	
+Version: 0.0.2
 	
 Author:  VS https://t.me/BhaagBoseDk 
