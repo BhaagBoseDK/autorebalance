@@ -14,7 +14,7 @@ This script run continuously to attempt to create a balanced node. The main idea
 Test it using
 
 <code>
-cd <path_to_script>
+cd path_to_script_is_installed
 	
 . ./autorebalance.sh 
 </code>
