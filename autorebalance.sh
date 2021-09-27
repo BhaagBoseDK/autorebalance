@@ -11,7 +11,7 @@
 # Or
 # It can be executed as a daily cron job.
 #
-# BOS (Balance of Satoshi) needs to be installed
+# BOS (Balance of Satoshi) > 10.20.0 (latest version) needs to be installed
 #
 # Add the following in crontab to run regulary. Change path as appropriate
 # 42 21 * * * <path_to_script>/autorebalance.sh >> ~/autorebalance.log 2>&1
@@ -20,9 +20,11 @@
 # 0.0.1 - first version
 # 0.0.2 - Added Tip for fun
 # 0.0.3 - Handling various bos instllations
+# 0.0.4 - Improvement after bos 10.20.0
 # ------------------------------------------------------------------------------------------------
 #
 
+min_bos_ver=10.20.0
 
 # Change These Parameters as per your requirements
 
@@ -40,8 +42,8 @@ MAX_FEE_RATE=299
 # Fee used to avoid expensive channels into you.
 LIMIT_FEE_RATE=299
 
-# Consider these channels for increasing local balance when outbound is below this limit
-OUTBOUND_BELOW=1000000
+#Consider these channels for decreasing local balance (move to remote) when outbound is above this limit
+OUT_OVER_INBOUND=0.6
 
 # Target rebalance to this capacity of Local. Keep this below 0.5 (50%)
 IN_TARGET_OUTBOUND=0.2
@@ -76,8 +78,6 @@ then
 	BOS=$myBOS
 fi
 
-echo "BOS is $BOS"
-
 #BOS=user_specific_path for bos
 
 # Peers to be omitted from outbound remabalancing. Add to --omit pubkey --omit pubkey syntax. If not specified all peers are considered
@@ -86,22 +86,31 @@ OMIT=" "
 echo "========= START UP ==========="
 date
 
-echo "Ensure Some Local if channel is < 1_000_000"
+bos_ver=`$BOS -V`
+echo "BOS is $BOS $bos_ver"
 
-#Get all peers. You can add  
+if [[ "$bos_ver" < "$min_bos_ver" ]] 
+then
+ echo "Error -1 : Please upgrade latest bos version equal or higher than $min_bos_ver" 
+ exit -1
+fi
 
-$BOS peers --no-color --complete --sort inbound_liquidity $OMIT \
+echo "Ensure Some Local if channel balance is < $IN_TARGET_OUTBOUND"
+
+#Get peers with high inbound
+
+$BOS peers --no-color --complete --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_INBOUND" $OMIT \
 | grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}' > ./sendout_tmp 
 
-#Get all low outbound channels.
-$BOS peers --no-color --complete --outbound-below $OUTBOUND_BELOW --sort outbound_liquidity | grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}' > ./bringin ;
+#Get all low outbound channels to rebalance
+$BOS peers --no-color --complete --filter "OUTBOUND_LIQUIDITY<(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$IN_TARGET_OUTBOUND" --sort outbound_liquidity | grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}' > ./bringin ;
 
 #Get unique list of nodes which can be used for rebalance (must have larger outbound)
-sendout_arr=(`cat ./bringin ./sendout_tmp | sort | uniq -u`)
+sendout_arr=(`cat ./sendout_tmp`)
 
 if [ ${#sendout_arr[@]} -eq 0 ] 
 then
- echo "Error -1 : No outbound peers available for rebalance. Consider lowering OUTBOUND_BELOW from "$OUTBOUND_BELOW
+ echo "Error -1 : No outbound peers available for rebalance. Consider lowering OUT_OVER_INBOUND from "$OUT_OVER_INBOUND
  exit -1
 fi
 
@@ -132,7 +141,7 @@ rm -f ./bringin ./sendout_tmp
 #Tip Author
 if [ $TIP -ne 0 ]
 then
- echo "Thank you..."
+ echo "Thank you... $TIP"
  $BOS send 03c5528c628681aa17ab9e117aa3ee6f06c750dfb17df758ecabcd68f1567ad8c1 --amount $TIP --message "Thank you from $MY_KEY"
 fi
  
