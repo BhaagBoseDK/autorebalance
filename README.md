@@ -1,6 +1,6 @@
 # autorebalance
 	
-This script run continuously to attempt to create a balanced node.
+This script can be run continuously to attempt to create a balanced node or one can run it on-demand.
 
 
 Usage:
