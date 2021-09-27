@@ -35,15 +35,16 @@ Or, it can be executed as a daily cron job. BOS (Balance of Satoshi) needs to be
 Change TIP=0 if you do not wish to tip the author.
 
 You may have to configure myBOS variable if the script is unable to determine bos installation.
-	
-0.0.1 - first version
-	
-0.0.2 - Added Tip for fun
 
-0.0.3 - Handling various bos instllations
+Author:  VS https://t.me/BhaagBoseDk 
 
-0.0.4 - Improvement after bos 10.20.0
-
+Change History:
+```	
+#0.0.1 - first version
+#0.0.2 - Added Tip for fun
+#0.0.3 - Handling various bos instllations
+#0.0.4 - Improvement after bos 10.20.0
+```
 Contact on telegram if there are issues running the script.
 	
-Author:  VS https://t.me/BhaagBoseDk 
+
