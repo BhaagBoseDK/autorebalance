@@ -4,6 +4,9 @@ This script run continuously to attempt to create a balanced node.
 
 
 Usage:
+Most nodes end up suffering from lack of liquidit on their local balace which leads to routing failure on their node as well as loss of reputation and reliability on the network, leading to their node being ignored on paths where there is liquidity.
+
+This script attempts to keep a minimum local balance on most channels to ensure reasonbale routing. Coupled with liquidity driven fee policy (low fee on high local, high fee on low local) it can create a two way routing node and improve the node position within the network.
 
 This script run continuously to attempt to create a balanced node. The main idea is to keep minimial liquidity on each channel to at least route some payments. The user is expected to customise the script with respect to fees and other parameters. These are available to edit on top of the script.  It can be executed in a TMUX session continuously as:
 
