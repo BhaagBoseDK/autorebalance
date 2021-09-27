@@ -36,7 +36,10 @@ Change TIP=0 if you do not wish to tip the author.
 
 You may have to configure myBOS variable if the script is unable to determine bos installation.
 	
-Version: 0.0.3
+# 0.0.1 - first version
+# 0.0.2 - Added Tip for fun
+# 0.0.3 - Handling various bos instllations
+# 0.0.4 - Improvement after bos 10.20.0
 
 Contact on telegram if there are issues running the script.
 	
