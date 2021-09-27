@@ -38,6 +38,8 @@ You may have to configure myBOS variable if the script is unable to determine bo
 
 Author:  VS https://t.me/BhaagBoseDk 
 
+Contact on telegram if there are issues running the script.
+
 Change History:
 ```	
 #0.0.1 - first version
@@ -45,6 +47,6 @@ Change History:
 #0.0.3 - Handling various bos instllations
 #0.0.4 - Improvement after bos 10.20.0
 ```
-Contact on telegram if there are issues running the script.
+
 	
 
