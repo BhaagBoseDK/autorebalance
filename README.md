@@ -2,7 +2,8 @@
 	
 This script can be run continuously to attempt to create a balanced node or one can run it on-demand.
 
-Algo:
+# Algo:
+
 Collect a set "sendout set" of peers with outbouond > OUT_OVER_CAPACITY (these are channels which are sent to remote using --out). You can add a list of peers which need to be omitted here if you do not want to use them as --out peers.  
 
 Collect a set "bringin_set" peers with outbound < IN_TARGET_OUTBOUND (these are depleted channels and need some minimal liquidity using --in). 
@@ -15,7 +16,8 @@ Please ensure IN_TARGET_OUTBOUND should be less than your entire node OUT_BOUND/
 
 The script can be updated to suit your individual needs. Further optimisation can be built. Please send suggestion to author (or report via issue report).
 
-Usage:
+# Usage:
+
 Most nodes end up suffering from lack of liquidit on their local balace which leads to routing failure on their node as well as loss of reputation and reliability on the network, leading to their node being ignored on paths where there is liquidity.
 
 This script attempts to keep a minimum local balance on most channels to ensure reasonbale routing. Coupled with liquidity driven fee policy (low fee on high local, high fee on low local) it can create a two way routing node and improve the node position within the network.
