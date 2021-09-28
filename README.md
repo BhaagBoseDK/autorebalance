@@ -2,6 +2,18 @@
 	
 This script can be run continuously to attempt to create a balanced node or one can run it on-demand.
 
+Algo:
+Collect a set "sendout set" of peers with outbouond > OUT_OVER_CAPACITY (these are channels which are sent to remote using --out). You can add a list of peers which need to be omitted here if you do not want to use them as --out peers.  
+
+Collect a set "bringin_set" peers with outbound < IN_TARGET_OUTBOUND (these are depleted channels and need some minimal liquidity using --in). 
+
+For every peers in bringin_set, a random out peer is selected from sendout_set and bos rebalance is performend. 
+
+At the end of the process, your node would have minimal liquidty on all channels which is good for your ranking and routability.
+
+Please ensure IN_TARGET_OUTBOUND should be less than your entire node OUT_BOUND/CAPACITY. Recommended 20% (0.2) tends to work for most nodes but can be adjusted.
+
+The script can be updated to suit your individual needs. Further optimisation can be built. Please send suggestion to author (or report via issue report).
 
 Usage:
 Most nodes end up suffering from lack of liquidit on their local balace which leads to routing failure on their node as well as loss of reputation and reliability on the network, leading to their node being ignored on paths where there is liquidity.
