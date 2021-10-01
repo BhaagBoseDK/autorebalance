@@ -21,8 +21,11 @@
 # 0.0.2 - Added Tip for fun
 # 0.0.3 - Handling various bos instllations
 # 0.0.4 - Improvement after bos 10.20.0
+# 0.1.0 - Reduced Sleep Time, minor varibale name change, other minor updates
 # ------------------------------------------------------------------------------------------------
 #
+
+script_ver=0.1.0
 
 min_bos_ver=10.20.0
 
@@ -43,7 +46,7 @@ MAX_FEE_RATE=299
 LIMIT_FEE_RATE=299
 
 #Consider these channels for decreasing local balance (move to remote) when outbound is above this limit
-OUT_OVER_INBOUND=0.6
+OUT_OVER_CAPACITY=0.6
 
 # Target rebalance to this capacity of Local. Keep this below 0.5 (50%)
 IN_TARGET_OUTBOUND=0.2
@@ -84,6 +87,7 @@ fi
 OMIT=" "
 
 echo "========= START UP ==========="
+echo "==== version $script_ver ===="
 date
 
 bos_ver=`$BOS -V`
@@ -97,9 +101,9 @@ fi
 
 echo "Ensure Some Local if channel balance is < $IN_TARGET_OUTBOUND"
 
-#Get peers with high inbound
+#Get peers with high outbound
 
-$BOS peers --no-color --complete --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_INBOUND" $OMIT \
+$BOS peers --no-color --complete --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT \
 | grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}' > ./sendout_tmp 
 
 #Get all low outbound channels to rebalance
@@ -110,7 +114,7 @@ sendout_arr=(`cat ./sendout_tmp`)
 
 if [ ${#sendout_arr[@]} -eq 0 ] 
 then
- echo "Error -1 : No outbound peers available for rebalance. Consider lowering OUT_OVER_INBOUND from "$OUT_OVER_INBOUND
+ echo "Error -1 : No outbound peers available for rebalance. Consider lowering OUT_OVER_CAPACITY from "$OUT_OVER_CAPACITY
  exit -1
 fi
 
@@ -132,8 +136,11 @@ for i in `cat ./bringin`; do \
  echo -e "\n in-------> "$i"\n";
 
  $BOS rebalance --in $i --out $OUT --in-target-outbound CAPACITY*$IN_TARGET_OUTBOUND --avoid "FEE_RATE>$LIMIT_FEE_RATE/$i" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
- date; sleep 30;\
+ date; sleep 1;\
 done
+
+#Place for other rebalances, custom rebalances
+
 
 #Cleanup
 rm -f ./bringin ./sendout_tmp
@@ -148,4 +155,5 @@ fi
 echo Final Sleep
 date; 
 echo "========= SLEEP ========"
-sleep 600
+# Remove # from the following line to sleep 10 minutes if you are running in a while loop.
+#sleep 600
