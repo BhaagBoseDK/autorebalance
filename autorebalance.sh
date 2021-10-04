@@ -22,10 +22,15 @@
 # 0.0.3 - Handling various bos instllations
 # 0.0.4 - Improvement after bos 10.20.0
 # 0.1.0 - Reduced Sleep Time, minor varibale name change, other minor updates
+# 0.1.1 - Placeholder for customised rebalances; added Out->In rebalcne for heavy local;
+#         change to array from local file
+#	  use of temporary in memory file system for working directories
+# 0.1.2	  <future> use of special bos tags to help with rebalance; 
+#	  use bos call to get MY_KEY
 # ------------------------------------------------------------------------------------------------
 #
 
-script_ver=0.1.0
+script_ver=0.1.1
 
 min_bos_ver=10.20.0
 
@@ -46,10 +51,16 @@ MAX_FEE_RATE=299
 LIMIT_FEE_RATE=299
 
 #Consider these channels for decreasing local balance (move to remote) when outbound is above this limit
-OUT_OVER_CAPACITY=0.6
+OUT_OVER_CAPACITY=0.7
 
 # Target rebalance to this capacity of Local. Keep this below 0.5 (50%)
 IN_TARGET_OUTBOUND=0.2
+
+# Add in AVOID conditions you want to add to rebalances
+AVOID=" "
+
+# Peers to be omitted from outbound remabalancing. Add to --omit pubkey --omit pubkey syntax. If not specified all peers are considered
+OMIT=" "
 
 #If you run bos in a specific manner or have alias defined for bos, type the same here and uncomment the line (replace #myBOS= by myBOS= and provide your bos path)
 #myBOS="your installation specific way to run bos"
@@ -83,9 +94,6 @@ fi
 
 #BOS=user_specific_path for bos
 
-# Peers to be omitted from outbound remabalancing. Add to --omit pubkey --omit pubkey syntax. If not specified all peers are considered
-OMIT=" "
-
 echo "========= START UP ==========="
 echo "==== version $script_ver ===="
 date
@@ -99,18 +107,29 @@ then
  exit -1
 fi
 
-echo "Ensure Some Local if channel balance is < $IN_TARGET_OUTBOUND"
+#These are temporary directories used by the script
+if [  -d /run/user ]
+then
+ T_DIR="--tmpdir=/run/user/$(id -u)"
+else
+ T_DIR=""
+fi
+
+MY_T_DIR=$(mktemp -dt "autorebalance.XXXXXXXX" $T_DIR)
+
+echo "Temporary Working Area $MY_T_DIR ... if you terminate the script, do remember to clean manually"
+
+#Get current peers
+$BOS peers > $MY_T_DIR/peers 2>&1
 
 #Get peers with high outbound
 
-$BOS peers --no-color --complete --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT \
-| grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}' > ./sendout_tmp 
+sendout_arr=(`$BOS peers --no-color --complete --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT \
+| grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`) 
 
 #Get all low outbound channels to rebalance
-$BOS peers --no-color --complete --filter "OUTBOUND_LIQUIDITY<(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$IN_TARGET_OUTBOUND" --sort outbound_liquidity | grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}' > ./bringin ;
-
-#Get unique list of nodes which can be used for rebalance (must have larger outbound)
-sendout_arr=(`cat ./sendout_tmp`)
+bringin_arr=(`$BOS peers --no-color --complete --filter "OUTBOUND_LIQUIDITY<(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$IN_TARGET_OUTBOUND" --sort outbound_liquidity \
+| grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
 if [ ${#sendout_arr[@]} -eq 0 ] 
 then
@@ -118,32 +137,48 @@ then
  exit -1
 fi
 
-# Avoid the nodes which are alreayd depleted from rebalancing
-AVOID=" "
-for i in `cat ./bringin`
- do AVOID=" --avoid $MY_KEY/$i $AVOID";
- done
-
-#echo $AVOID
+if [ ${#bringin_arr[@]} -eq 0 ] 
+then
+ echo "Error -1 : No inbound peers available for rebalance. Consider lowering IN_TARGET_OUTBOUND from "$IN_TARGET_OUTBOUND
+ exit -1
+fi
 
 # Rebalance with a random outbound node 
-for i in `cat ./bringin`; do \
+
+echo "Working with ${#bringin_arr[@]} peers to increase outbound via ${#sendout_arr[@]} peers to decrease outbound"
+
+echo "Step 1 ... Ensure Local balance if channel local balance is < $IN_TARGET_OUTBOUND"
+
+for IN in "${bringin_arr[@]}"; do \
  j=$(($RANDOM % ${#sendout_arr[@]}));
  #Select A random out peer
  OUT=${sendout_arr[j]};
 
- echo -e "\n out------> "$OUT"\n"; 
- echo -e "\n in-------> "$i"\n";
+ echo -e "\n out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers;
 
- $BOS rebalance --in $i --out $OUT --in-target-outbound CAPACITY*$IN_TARGET_OUTBOUND --avoid "FEE_RATE>$LIMIT_FEE_RATE/$i" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
+ echo -e "\n in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers;
+
+ $BOS rebalance --in $IN --out $OUT --in-target-outbound CAPACITY*$IN_TARGET_OUTBOUND --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
  date; sleep 1;\
 done
 
-#Place for other rebalances, custom rebalances
+echo "Step 2 ... Reducing outbound for channesl with outbound  > $OUT_OVER_CAPACITY to CAPACITY/2"
 
+for OUT in "${sendout_arr[@]}"; do \
+ j=$(($RANDOM % ${#bringin_arr[@]}));
+ #Select A random in peer
+ IN=${bringin_arr[j]};
+
+ echo -e "\n out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers;
+
+ echo -e "\n in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers;
+
+ $BOS rebalance --in $IN --out $OUT --out-target-inbound CAPACITY/2 --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
+ date; sleep 1;\
+done
 
 #Cleanup
-rm -f ./bringin ./sendout_tmp
+rm -rf $MY_T_DIR
 
 #Tip Author
 if [ $TIP -ne 0 ]

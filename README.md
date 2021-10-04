@@ -8,9 +8,11 @@ Collect a set "sendout set" of peers with outbouond > OUT_OVER_CAPACITY (these a
 
 Collect a set "bringin_set" peers with outbound < IN_TARGET_OUTBOUND (these are depleted channels and need some minimal liquidity using --in). 
 
-For every peers in bringin_set, a random out peer is selected from sendout_set and bos rebalance is performend. 
+In Step 1 for every peer in bringin_set, a random out peer is selected from sendout_set and bos rebalance is performend to ensure at least IN_TARGET_OUTBOUND liquidity.
 
-At the end of the process, your node would have minimal liquidty on all channels which is good for your ranking and routability.
+In Step 2 for every peer in sendout_set, a random in peer is selected from bringin_set and bos rebalance is performed to ensure outbound capacity as 50:50 on the out peer.
+
+At the end of the process, your node would have minimal liquidty on all channels which is good for your ranking and routability. It will also ensure heavy outbound channels are balanced.
 
 Please ensure IN_TARGET_OUTBOUND should be less than your entire node OUT_BOUND/CAPACITY. Recommended 20% (0.2) tends to work for most nodes but can be adjusted.
 
@@ -57,6 +59,7 @@ Or, it can be executed as a daily cron job. BOS (Balance of Satoshi) needs to be
 ```
 42 21 * * * ~/autorebalance/autorebalance.sh >> ~/autorebalance/autorebalance.log 2>&1
 ```
+
 Change TIP=0 if you do not wish to tip the author.
 
 You may have to configure myBOS variable if the script is unable to determine bos installation.
@@ -71,4 +74,9 @@ Change History:
 #0.0.2 - Added Tip for fun
 #0.0.3 - Handling various bos instllations
 #0.0.4 - Improvement after bos 10.20.0
+#0.1.0 - Reduced Sleep Time, minor varibale name change, other minor updates
+#0.1.1 - Placeholder for customised rebalances; added Out->In rebalcne for heavy local;
+         change to array from local file
+         use of temporary in memory file system for working directories
+         change to array from local file
 ```
