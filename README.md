@@ -79,4 +79,6 @@ Change History:
          change to array from local file
          use of temporary in memory file system for working directories
          change to array from local file
+#0.1.2 - use bos call to get MY_KEY
+       - bugfix with temp directory to use PWD if temp area not created.
 ```

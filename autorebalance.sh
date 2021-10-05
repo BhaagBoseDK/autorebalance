@@ -25,12 +25,14 @@
 # 0.1.1 - Placeholder for customised rebalances; added Out->In rebalcne for heavy local;
 #         change to array from local file
 #	  use of temporary in memory file system for working directories
-# 0.1.2	  <future> use of special bos tags to help with rebalance; 
-#	  use bos call to get MY_KEY
+# 0.1.2	- use bos call to get MY_KEY
+#       - bugfix with temp directory to use PWD if temp area not created.
+# 0.1.3	<future> use of special bos tags to help with rebalance; 
+#
 # ------------------------------------------------------------------------------------------------
 #
 
-script_ver=0.1.1
+script_ver=0.1.2
 
 min_bos_ver=10.20.0
 
@@ -39,8 +41,6 @@ min_bos_ver=10.20.0
 #If you DO NOT wish to tip 1 sat to author each time you run this script make this value 0. If you wish to increase the tip, change to whatever you want. 
 TIP=1
 
-# your public key
-MY_KEY=03c5528c628681aa17ab9e117aa3ee6f06c750dfb17df758ecabcd68f1567ad8c1
 # Max_Fee is kept as high since we will control the rebalance with fee-rate. Change if reuired.
 MAX_FEE=50000
 
@@ -107,12 +107,17 @@ then
  exit -1
 fi
 
+MY_KEY=`bos call getidentity | sed "s,\x1B\[[0-9;]*[a-zA-Z],,g" | awk -F : '{print $2}'`
+
+echo "My node pub key ..... $MY_KEY"
+
 #These are temporary directories used by the script
 if [  -d /run/user ]
 then
  T_DIR="--tmpdir=/run/user/$(id -u)"
 else
- T_DIR=""
+ #Use Current Directory as temp area
+ T_DIR="--tmpdir=."
 fi
 
 MY_T_DIR=$(mktemp -dt "autorebalance.XXXXXXXX" $T_DIR)
