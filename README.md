@@ -4,15 +4,24 @@ This script can be run continuously to attempt to create a balanced node or one 
 
 # Algo:
 
-Collect a set "sendout set" of peers with outbouond > OUT_OVER_CAPACITY (these are channels which are sent to remote using --out). You can add a list of peers which need to be omitted here if you do not want to use them as --out peers.  
+Special bos tags ab_for_out/ab_for_in are used. Tag names can be configured in the script.
 
-Collect a set "bringin_set" peers with outbound < IN_TARGET_OUTBOUND (these are depleted channels and need some minimal liquidity using --in). 
+ab_for_out tag contains all peers which you want to mostly keep local (i.e. they flow out to generate routing or your)
+ab_for_in tag contains all peers which you want to mostly keep remote (i.e. they flow in through your node and generate routing for your).
+
+Collect a set "sendout set" of peers with outbouond > OUT_OVER_CAPACITY (these are channels which are sent to remote using --out). You can add a list of peers which need to be omitted here if you do not want to use them as --out peers. Peers in ab_for_in tag are added to sendout_set.  
+
+Collect a set "bringin_set" peers with outbound < IN_TARGET_OUTBOUND*80% (these are depleted channels and need some minimal liquidity using --in). You can add a list of peers which need to be omitted if you do not want them to be used as --in peers. Peers in ab_for_out tag are added to the bringin_set.
 
 In Step 1 for every peer in bringin_set, a random out peer is selected from sendout_set and bos rebalance is performend to ensure at least IN_TARGET_OUTBOUND liquidity.
 
 In Step 2 for every peer in sendout_set, a random in peer is selected from bringin_set and bos rebalance is performed to ensure outbound capacity as 50:50 on the out peer.
 
-At the end of the process, your node would have minimal liquidty on all channels which is good for your ranking and routability. It will also ensure heavy outbound channels are balanced.
+In Step 3 for every peer in ab_for_out, a random out peer is selected from sendout_set and rebalance is performend to maximise local balance.
+
+In step 4, for every peer in ab_for_in, a random in peer is selected from bringin_set and rebalance is performed to maximise remote balance.
+
+In step 5, if you have LOOP channel, rebalance is performed to bring loop balance to local (to avoid channel closure by LOOP).
 
 Please ensure IN_TARGET_OUTBOUND should be less than your entire node OUT_BOUND/CAPACITY. Recommended 20% (0.2) tends to work for most nodes but can be adjusted.
 
@@ -81,4 +90,5 @@ Change History:
          change to array from local file
 #0.1.2 - use bos call to get MY_KEY
        - bugfix with temp directory to use PWD if temp area not created.
+#0.1.3 - use special bos tags in peer selection if defined.
 ```
