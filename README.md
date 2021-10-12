@@ -9,6 +9,8 @@ Special bos tags ab_for_out/ab_for_in are used. Tag names can be configured in t
 ab_for_out tag contains all peers which you want to mostly keep local (i.e. they flow out to generate routing or your)
 ab_for_in tag contains all peers which you want to mostly keep remote (i.e. they flow in through your node and generate routing for your).
 
+in the script you can define multiple tags for in or out using --tag tagname --tag tagname syntax.
+
 Collect a set "sendout set" of peers with outbouond > OUT_OVER_CAPACITY (these are channels which are sent to remote using --out). You can add a list of peers which need to be omitted here if you do not want to use them as --out peers. Peers in ab_for_in tag are added to sendout_set.  
 
 Collect a set "bringin_set" peers with outbound < IN_TARGET_OUTBOUND*80% (these are depleted channels and need some minimal liquidity using --in). You can add a list of peers which need to be omitted if you do not want them to be used as --in peers. Peers in ab_for_out tag are added to the bringin_set.
@@ -91,4 +93,5 @@ Change History:
 #0.1.2 - use bos call to get MY_KEY
        - bugfix with temp directory to use PWD if temp area not created.
 #0.1.3 - use special bos tags in peer selection if defined.
+#0.1.4 - allow multiple bos tags
 ```

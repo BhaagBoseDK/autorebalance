@@ -27,13 +27,15 @@
 #	  use of temporary in memory file system for working directories
 # 0.1.2	- use bos call to get MY_KEY
 #       - bugfix with temp directory to use PWD if temp area not created.
-# 0.1.3 - use special bos tags in peer selection if defined.	
-# 	<future> use of special bos tags to help with rebalance; 
+# 0.1.3 - use special bos tags in peer selection if defined.
+# 0.1.4 - allow multiple bos tags
+#
+# 	<future_wip>
 #
 # ------------------------------------------------------------------------------------------------
 #
 
-script_ver=0.1.3
+script_ver=0.1.4
 
 min_bos_ver=11.3.0
 
@@ -80,9 +82,11 @@ OMIT_IN=" "
 # ab_for_out : peers you prefer to keep local - increaes local if possible. These will not be used as --out
 # ab_for_in : peers you prefer to keep remote - increase remote if possible. These will not be use as --in
 
-# Change the tag name here if you have other names for similar purpose.
-TAG_FOR_OUT="ab_for_out"
-TAG_FOR_IN="ab_for_in"
+# Change the tag name here if you have other names for similar purpose you can add multiple with --tag tagname syntax. Make it " " if no tags are required.
+TAG_FOR_OUT="--tag ab_for_out"
+TAG_FOR_IN="--tag ab_for_in"
+
+#Not used right now. For future.
 MINIMUM_LIQUIDITY=250000
 
 #If you run bos in a specific manner or have alias defined for bos, type the same here and uncomment the line (replace #myBOS= by myBOS= and provide your bos path)
@@ -158,13 +162,16 @@ else
  $BOS peers > $MY_T_DIR/peers 2>&1
 fi
 
-forout_arr=(`$BOS peers --no-color --complete --tag $TAG_FOR_OUT --filter "INBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" \
-| grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`) 
+if [ "$TAG_FOR_OUT" != " " ]
+then
+ forout_arr=(`$BOS peers --no-color --complete $TAG_FOR_OUT \
+ | grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`) 
 
-echo "Working with ${#forout_arr[@]} special peers to keep local, do not use in --out"
+ echo "Working with ${#forout_arr[@]} special peers to keep local, do not use in --out"
+fi
 
 if [ ${#forout_arr[@]} -ne 0 ]
-then 
+then
  # Add to OMIT_OUT
  for i in "${forout_arr[@]}"
   do
@@ -174,10 +181,13 @@ fi
 
 #$DEBUG $OMIT_OUT
 
-forin_arr=(`$BOS peers --no-color --complete --tag $TAG_FOR_IN --filter "OUTBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" \
-| grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`) 
+if [ "$TAG_FOR_IN" != " " ]
+then
+ forin_arr=(`$BOS peers --no-color --complete $TAG_FOR_IN \
+ | grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`) 
 
-echo "Working with ${#forin_arr[@]} special peers to keep remote, do not use in --in"
+ echo "Working with ${#forin_arr[@]} special peers to keep remote, do not use in --in"
+fi
 
 if [ ${#forin_arr[@]} -ne 0 ]
 then 
