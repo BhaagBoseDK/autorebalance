@@ -94,4 +94,7 @@ Change History:
        - bugfix with temp directory to use PWD if temp area not created.
 #0.1.3 - use special bos tags in peer selection if defined.
 #0.1.4 - allow multiple bos tags
+#0.1.5 - bug fixes in peer selection
+       - only use active nodes
+       - Indicate the executing step number.
 ```

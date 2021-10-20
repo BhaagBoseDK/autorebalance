@@ -29,13 +29,16 @@
 #       - bugfix with temp directory to use PWD if temp area not created.
 # 0.1.3 - use special bos tags in peer selection if defined.
 # 0.1.4 - allow multiple bos tags
+# 0.1.5 - bug fixes in peer selection
+#       - only use active nodes
+#       - Indicate the executing step number.
 #
 # 	<future_wip>
 #
 # ------------------------------------------------------------------------------------------------
 #
 
-script_ver=0.1.4
+script_ver=0.1.5
 
 min_bos_ver=11.3.0
 
@@ -56,8 +59,8 @@ MAX_FEE_RATE=299
 LIMIT_FEE_RATE=299
 
 #High Fees are used in Step 3 and 4. Keep same if you want
-HIGH_MAX_FEE_RATE=499
-HIGH_LIMIT_FEE_RATE=499
+HIGH_MAX_FEE_RATE=449
+HIGH_LIMIT_FEE_RATE=449
 
 #Loop fees are used for LOOP rebalance
 LOOP_MAX_FEE_RATE=2500
@@ -164,8 +167,8 @@ fi
 
 if [ "$TAG_FOR_OUT" != " " ]
 then
- forout_arr=(`$BOS peers --no-color --complete $TAG_FOR_OUT \
- | grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`) 
+ forout_arr=(`$BOS peers --no-color --complete --active $TAG_FOR_OUT \
+ | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`) 
 
  echo "Working with ${#forout_arr[@]} special peers to keep local, do not use in --out"
 fi
@@ -183,8 +186,8 @@ fi
 
 if [ "$TAG_FOR_IN" != " " ]
 then
- forin_arr=(`$BOS peers --no-color --complete $TAG_FOR_IN \
- | grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`) 
+ forin_arr=(`$BOS peers --no-color --complete --active $TAG_FOR_IN \
+ | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`) 
 
  echo "Working with ${#forin_arr[@]} special peers to keep remote, do not use in --in"
 fi
@@ -202,15 +205,15 @@ fi
 
 #Get peers with high outbound
 
-sendout_arr=(`$BOS peers --no-color --complete --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT_OUT \
-| grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`) 
+sendout_arr=(`$BOS peers --no-color --complete --active --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT_OUT \
+| grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`) 
 
 #Add peers which we prefer to send out
 sendout_arr+=(${forin_arr[@]})
 
 #Get all low outbound channels 80% below minimum to increase local.
-bringin_arr=(`$BOS peers --no-color --complete --sort outbound_liquidity --filter "OUTBOUND_LIQUIDITY<(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$IN_TARGET_OUTBOUND*8/10" $OMIT_IN \
-| grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
+bringin_arr=(`$BOS peers --no-color --complete --active --sort outbound_liquidity --filter "OUTBOUND_LIQUIDITY<(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$IN_TARGET_OUTBOUND*8/10" $OMIT_IN \
+| grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
 #Add peers which we prefer to bring in
 bringin_arr+=(${forout_arr[@]})
@@ -237,9 +240,9 @@ for IN in "${bringin_arr[@]}"; do \
  #Select A random out peer
  OUT=${sendout_arr[j]};
 
- echo -e "\n out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
+ echo -e "\n 1.out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
 
- echo -e "\n in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
+ echo -e "\n 1.in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
 
  $BOS rebalance --in $IN --out $OUT --in-target-outbound CAPACITY*$IN_TARGET_OUTBOUND --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
  date; sleep 1;
@@ -253,9 +256,9 @@ for OUT in "${sendout_arr[@]}"; do \
  #Select A random in peer
  IN=${bringin_arr[j]};
 
- echo -e "\n out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
+ echo -e "\n 2.out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
 
- echo -e "\n in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
+ echo -e "\n 2.in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
 
  $BOS rebalance --in $IN --out $OUT --out-target-inbound CAPACITY/2 --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
  date; sleep 1;
@@ -274,9 +277,9 @@ for IN in "${forout_arr[@]}"; do \
  #Select A random out peer
  OUT=${sendout_arr[j]};
 
- echo -e "\n out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
+ echo -e "\n 3.out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
 
- echo -e "\n in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
+ echo -e "\n 3.in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
 
  $BOS rebalance --in $IN --out $OUT --in-target-outbound CAPACITY --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
  date; sleep 1;
@@ -290,9 +293,9 @@ for OUT in "${forin_arr[@]}"; do \
  #Select A random in peer
  IN=${bringin_arr[j]};
 
- echo -e "\n out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
+ echo -e "\n 4.out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
 
- echo -e "\n in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
+ echo -e "\n 4.in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
 
  $BOS rebalance --in $IN --out $OUT --out-target-inbound CAPACITY --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
  date; sleep 1;
@@ -305,12 +308,11 @@ loop_count=`grep $LOOP $MY_T_DIR/peers | wc -l`
 if [ $loop_count -gt 0 ]
 then 
  echo "Step 5 ... Reduce Remote for LOOP"
- #Change this fee in line with your loop rebalance strategy.
  MAX_FEE_RATE=$LOOP_MAX_FEE_RATE
  LIMIT_FEE_RATE=$LOOP_LIMIT_FEE_RATE
 
  IN=$LOOP
- echo -e "\n in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
+ echo -e "\n 5.in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
 
  $BOS rebalance --in $IN --in-target-outbound CAPACITY --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;
  date; sleep 1;
@@ -323,7 +325,7 @@ rm -rf $MY_T_DIR
 if [ $TIP -ne 0 ]
 then
  echo "Thank you... $TIP"
- $BOS send 03c5528c628681aa17ab9e117aa3ee6f06c750dfb17df758ecabcd68f1567ad8c1 --amount $TIP --message "Thank you rebalancing $MY_KEY"
+ $BOS send 03c5528c628681aa17ab9e117aa3ee6f06c750dfb17df758ecabcd68f1567ad8c1 --amount $TIP --message "Thank you for rebalancing $MY_KEY"
 fi
  
 echo Final Sleep you can press ctrl-c
