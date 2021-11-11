@@ -97,4 +97,7 @@ Change History:
 #0.1.5 - bug fixes in peer selection
        - only use active nodes
        - Indicate the executing step number.
+#0.1.6 - Do a nudge to idle peers
+       - bos version 11.10.0
+
 ```
