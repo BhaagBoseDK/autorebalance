@@ -32,15 +32,17 @@
 # 0.1.5 - bug fixes in peer selection
 #       - only use active nodes
 #       - Indicate the executing step number.
+# 0.1.6 - Do a nudge to idle peers
+#       - bos version 11.10.0
 #
 # 	<future_wip>
 #
 # ------------------------------------------------------------------------------------------------
 #
 
-script_ver=0.1.5
+script_ver=0.1.6
 
-min_bos_ver=11.3.0
+min_bos_ver=11.10.0
 
 DEBUG=echo
 
@@ -53,14 +55,14 @@ TIP=1
 MAX_FEE=50000
 
 # Max Fee you want to pay for rebalance.
-MAX_FEE_RATE=299
+MAX_FEE_RATE=199
 
 # Fee used to avoid expensive channels into you.
-LIMIT_FEE_RATE=299
+LIMIT_FEE_RATE=199
 
 #High Fees are used in Step 3 and 4. Keep same if you want
-HIGH_MAX_FEE_RATE=449
-HIGH_LIMIT_FEE_RATE=449
+HIGH_MAX_FEE_RATE=399
+HIGH_LIMIT_FEE_RATE=399
 
 #Loop fees are used for LOOP rebalance
 LOOP_MAX_FEE_RATE=2500
@@ -97,6 +99,9 @@ MINIMUM_LIQUIDITY=250000
 
 #PubKey for LOOP
 LOOP="021c97a90a411ff2b10dc2a8e32de2f29d2fa49d41bfbb52bd416e460db0747d0d"
+
+#Idle Days for nudge
+IDLE_DAYS=30
 
 # ------------ START OF SCRIPT ------------
 #Set possible BOS paths
@@ -203,6 +208,14 @@ fi
 
 #$DEBUG $OMIT_IN
 
+if [ $IDLE_DAYS > 0 ]
+then
+ idle_arr=(`$BOS peers --no-color --complete --active --idle-days $IDLE_DAYS \
+ | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`) 
+
+ echo "Working with ${#idle_arr[@]} idle peers to shake up"
+fi
+
 #Get peers with high outbound
 
 sendout_arr=(`$BOS peers --no-color --complete --active --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT_OUT \
@@ -229,6 +242,31 @@ then
  echo "Error -1 : No inbound peers available for rebalance. Consider lowering IN_TARGET_OUTBOUND from "$IN_TARGET_OUTBOUND
  exit -1
 fi
+
+echo "Step 0 ... Nudging idle peers to CAPACITY/2"
+echo "Working with ${#idle_arr[@]} peers to increase balance to CAPACITY/2 inbound via ${#bringin_arr[@]} peers to decrease inbound"
+
+for OUT in "${idle_arr[@]}"; do \
+ j=$(($RANDOM % ${#bringin_arr[@]}));
+ #Select A random in peer
+ IN=${bringin_arr[j]};
+
+ echo -e "\n 0.out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
+
+ echo -e "\n 0.in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
+
+ $BOS rebalance --in $IN --out $OUT --out-target-inbound CAPACITY/2 --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
+ date; sleep 1;
+
+ #Send message to peer randomly once in 10000 times
+
+ j=$(($RANDOM % 10000));
+ #echo $j
+ if [ $j = 6942 ]
+ then 
+  $BOS send $OUT --amount 1 --max-fee 1 --message "No activity bewteen our channel for 30 days. Please review. Love from $MY_KEY" 
+ fi
+done
 
 # Rebalance with a random outbound node 
 
