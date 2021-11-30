@@ -34,6 +34,8 @@
 #       - Indicate the executing step number.
 # 0.1.6 - Do a nudge to idle peers
 #       - bos version 11.10.0
+# 0.1.7 - Rebalance CHIVO to remote
+#       - bos clean-failed-payments upon exit
 #
 # 	<future_wip>
 #
@@ -55,18 +57,18 @@ TIP=1
 MAX_FEE=50000
 
 # Max Fee you want to pay for rebalance.
-MAX_FEE_RATE=199
+MAX_FEE_RATE=469
 
 # Fee used to avoid expensive channels into you.
-LIMIT_FEE_RATE=199
+LIMIT_FEE_RATE=469
 
 #High Fees are used in Step 3 and 4. Keep same if you want
-HIGH_MAX_FEE_RATE=399
-HIGH_LIMIT_FEE_RATE=399
+HIGH_MAX_FEE_RATE=1569
+HIGH_LIMIT_FEE_RATE=1569
 
 #Loop fees are used for LOOP rebalance
-LOOP_MAX_FEE_RATE=2500
-LOOP_LIMIT_FEE_RATE=2000
+LOOP_MAX_FEE_RATE=2569
+LOOP_LIMIT_FEE_RATE=2069
 
 #Consider these channels for decreasing local balance (move to remote) when outbound is above this limit
 OUT_OVER_CAPACITY=0.7
@@ -99,6 +101,8 @@ MINIMUM_LIQUIDITY=250000
 
 #PubKey for LOOP
 LOOP="021c97a90a411ff2b10dc2a8e32de2f29d2fa49d41bfbb52bd416e460db0747d0d"
+#PubKey for CHIVO
+CHIVO="02f72978d40efeffca537139ad6ac9f09970c000a2dbc0d7aa55a71327c4577a80"
 
 #Idle Days for nudge
 IDLE_DAYS=30
@@ -224,12 +228,17 @@ sendout_arr=(`$BOS peers --no-color --complete --active --sort inbound_liquidity
 #Add peers which we prefer to send out
 sendout_arr+=(${forin_arr[@]})
 
+echo "Working with ${#sendout_arr[@]} peers to rebalance to remote"
+
 #Get all low outbound channels 80% below minimum to increase local.
 bringin_arr=(`$BOS peers --no-color --complete --active --sort outbound_liquidity --filter "OUTBOUND_LIQUIDITY<(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$IN_TARGET_OUTBOUND*8/10" $OMIT_IN \
 | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
+
 #Add peers which we prefer to bring in
 bringin_arr+=(${forout_arr[@]})
+
+echo "Working with ${#bringin_arr[@]} peers to rebalance to local"
 
 if [ ${#sendout_arr[@]} -eq 0 ] 
 then
@@ -263,7 +272,9 @@ for OUT in "${idle_arr[@]}"; do \
  j=$(($RANDOM % 10000));
  #echo $j
  if [ $j = 6942 ]
- then 
+ then
+  echo "... Random nudge $OUT No activity bewteen our channel for 30 days. Please review. Love from $MY_KEY" 
+
   $BOS send $OUT --amount 1 --max-fee 1 --message "No activity bewteen our channel for 30 days. Please review. Love from $MY_KEY" 
  fi
 done
@@ -326,6 +337,9 @@ done
 echo "Step 4 ... Increasing remote for channels we prefer to keep remote"
 echo "Working with ${#forin_arr[@]} peers to increase inbound via ${#bringin_arr[@]} peers to decrease inbound"
 
+#This section is only applicaation if you have channel with Chivo.
+chivo_count=`grep $CHIVO $MY_T_DIR/peers | wc -l`
+
 for OUT in "${forin_arr[@]}"; do \
  j=$(($RANDOM % ${#bringin_arr[@]}));
  #Select A random in peer
@@ -337,6 +351,21 @@ for OUT in "${forin_arr[@]}"; do \
 
  $BOS rebalance --in $IN --out $OUT --out-target-inbound CAPACITY --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
  date; sleep 1;
+
+ #This section is only applicaation if you have channel with Chivo.
+ if [ $chivo_count -gt 0 ]
+ then
+  #Try chivo wallet with the same in peer. (improve in future)
+
+  OUT=$CHIVO
+
+  echo -e "\n 4.1.out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
+
+  echo -e "\n 4.1.in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
+
+  $BOS rebalance --in $IN --out $OUT --out-target-inbound CAPACITY --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
+  date; sleep 1;
+ fi
 done
 
 #This section is only applicaation if you have channel with LOOP. Remember to increase fees with LOOP
@@ -357,7 +386,9 @@ then
 fi
 
 #Cleanup
+echo " ... Cleanup"
 rm -rf $MY_T_DIR
+$BOS clean-failed-payments
 
 #Tip Author
 if [ $TIP -ne 0 ]

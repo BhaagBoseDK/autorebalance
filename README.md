@@ -99,5 +99,7 @@ Change History:
        - Indicate the executing step number.
 #0.1.6 - Do a nudge to idle peers
        - bos version 11.10.0
+#0.1.7 - Rebalance CHIVO to remote
+       - bos clean-failed-payments upon exit
 
 ```
