@@ -101,5 +101,8 @@ Change History:
        - bos version 11.10.0
 #0.1.7 - Rebalance CHIVO to remote
        - bos clean-failed-payments upon exit
+#0.1.8 - Nudge Idle for IN
+       - Use Chivo for Idle in special loop
+       - Send Idle Nudge
 
 ```

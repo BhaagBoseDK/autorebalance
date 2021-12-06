@@ -36,17 +36,23 @@
 #       - bos version 11.10.0
 # 0.1.7 - Rebalance CHIVO to remote
 #       - bos clean-failed-payments upon exit
+# 0.1.8 - Nudge Idle for IN
+#       - Use Chivo for Idle in special loop
+#       - Send Idle Nudge
 #
-# 	<future_wip>
+script_ver=0.1.8
+#
 #
 # ------------------------------------------------------------------------------------------------
 #
 
-script_ver=0.1.6
-
 min_bos_ver=11.10.0
 
 DEBUG=echo
+
+# define constants
+declare -r TRUE=0
+declare -r FALSE=1
 
 # Change These Parameters as per your requirements
 
@@ -57,10 +63,10 @@ TIP=1
 MAX_FEE=50000
 
 # Max Fee you want to pay for rebalance.
-MAX_FEE_RATE=469
+MAX_FEE_RATE=869
 
 # Fee used to avoid expensive channels into you.
-LIMIT_FEE_RATE=469
+LIMIT_FEE_RATE=869
 
 #High Fees are used in Step 3 and 4. Keep same if you want
 HIGH_MAX_FEE_RATE=1569
@@ -68,13 +74,13 @@ HIGH_LIMIT_FEE_RATE=1569
 
 #Loop fees are used for LOOP rebalance
 LOOP_MAX_FEE_RATE=2569
-LOOP_LIMIT_FEE_RATE=2069
+LOOP_LIMIT_FEE_RATE=2169
 
 #Consider these channels for decreasing local balance (move to remote) when outbound is above this limit
-OUT_OVER_CAPACITY=0.7
+OUT_OVER_CAPACITY=0.6
 
 # Target rebalance to this capacity of Local. Keep this below 0.5 (50%)
-IN_TARGET_OUTBOUND=0.2
+IN_TARGET_OUTBOUND=0.3
 
 # Add in AVOID conditions you want to add to all rebalances
 AVOID=" "
@@ -105,7 +111,9 @@ LOOP="021c97a90a411ff2b10dc2a8e32de2f29d2fa49d41bfbb52bd416e460db0747d0d"
 CHIVO="02f72978d40efeffca537139ad6ac9f09970c000a2dbc0d7aa55a71327c4577a80"
 
 #Idle Days for nudge
-IDLE_DAYS=30
+IDLE_DAYS=7
+NUDGE_AMOUNT=69420
+NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
 # ------------ START OF SCRIPT ------------
 #Set possible BOS paths
@@ -177,7 +185,7 @@ fi
 if [ "$TAG_FOR_OUT" != " " ]
 then
  forout_arr=(`$BOS peers --no-color --complete --active $TAG_FOR_OUT \
- | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`) 
+ | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
  echo "Working with ${#forout_arr[@]} special peers to keep local, do not use in --out"
 fi
@@ -202,7 +210,7 @@ then
 fi
 
 if [ ${#forin_arr[@]} -ne 0 ]
-then 
+then
  # Add to OMIT_IN
  for i in "${forin_arr[@]}"
   do
@@ -215,7 +223,7 @@ fi
 if [ $IDLE_DAYS > 0 ]
 then
  idle_arr=(`$BOS peers --no-color --complete --active --idle-days $IDLE_DAYS \
- | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`) 
+ | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
  echo "Working with ${#idle_arr[@]} idle peers to shake up"
 fi
@@ -237,6 +245,8 @@ bringin_arr=(`$BOS peers --no-color --complete --active --sort outbound_liquidit
 
 #Add peers which we prefer to bring in
 bringin_arr+=(${forout_arr[@]})
+#Add idle arr to bring in
+bringin_arr+=(${idle_arr[@]})
 
 echo "Working with ${#bringin_arr[@]} peers to rebalance to local"
 
@@ -252,19 +262,49 @@ then
  exit -1
 fi
 
+#Functions
+function send_to_peer()
+{
+ OUT=$1
+ IN=$2
+ SEND_AMOUNT=${3:-$NUDGE_AMOUNT}
+ MAX_FEE_SEND=${4:-$NUDGE_FEE}
+ STEP=${5:-X}
+
+ echo -e "\n $STEP... sending $SEND_AMOUNT from $OUT to $IN for max fee $MAX_FEE_SEND"
+ echo -e "\n $STEP.out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
+
+ echo -e "\n $STEP.in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
+
+ echo  -e "\n ... $BOS send $MY_KEY --amount $SEND_AMOUNT --max-fee $MAX_FEE_SEND --out $OUT --in $IN && return $TRUE || return $FALSE"
+
+ $BOS send $MY_KEY --amount $SEND_AMOUNT --max-fee $MAX_FEE_SEND --out $OUT --in $IN && return $TRUE || return $FALSE
+}
+
+function rebalance()
+{
+ OUT=$1
+ IN=$2
+ TARGET=$3
+ FEE_RATE=${4:-$MAX_FEE_RATE}
+ FEE=${5:-$MAX_FEE}
+
+ echo -e "\n ... $BOS rebalance --in $IN --out $OUT $TARGET --avoid FEE_RATE>$LIMIT_FEE_RATE/$IN --avoid $OUT/FEE_RATE>$LIMIT_FEE_RATE --max-fee-rate $FEE_RATE --max-fee $FEE $AVOID && return $TRUE || return $FALSE"
+
+ $BOS rebalance --in $IN --out $OUT $TARGET --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $FEE_RATE --max-fee $FEE $AVOID && return $TRUE || return $FALSE
+}
+
 echo "Step 0 ... Nudging idle peers to CAPACITY/2"
-echo "Working with ${#idle_arr[@]} peers to increase balance to CAPACITY/2 inbound via ${#bringin_arr[@]} peers to decrease inbound"
+echo "Working with ${#idle_arr[@]} peers to increase outbound balance to CAPACITY/2 via ${#sendout_arr[@]} peers to decrease outbound"
 
-for OUT in "${idle_arr[@]}"; do \
- j=$(($RANDOM % ${#bringin_arr[@]}));
- #Select A random in peer
- IN=${bringin_arr[j]};
+for IN in "${idle_arr[@]}"; do \
+ j=$(($RANDOM % ${#sendout_arr[@]}));
+ #Select A random out peer
+ OUT=${sendout_arr[j]};
 
- echo -e "\n 0.out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
+ #send a nudge and if success rebalance
+ send_to_peer $OUT $IN $NUDGE_AMOUNT $NUDGE_FEE 0 && rebalance $OUT $IN "--in-target-outbound CAPACITY/2"
 
- echo -e "\n 0.in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
-
- $BOS rebalance --in $IN --out $OUT --out-target-inbound CAPACITY/2 --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
  date; sleep 1;
 
  #Send message to peer randomly once in 10000 times
@@ -273,13 +313,13 @@ for OUT in "${idle_arr[@]}"; do \
  #echo $j
  if [ $j = 6942 ]
  then
-  echo "... Random nudge $OUT No activity bewteen our channel for 30 days. Please review. Love from $MY_KEY" 
+  echo "... Random nudge $OUT No activity bewteen our channel for 30 days. Please review. Love from $MY_KEY"
 
-  $BOS send $OUT --amount 1 --max-fee 1 --message "No activity bewteen our channel for 30 days. Please review. Love from $MY_KEY" 
+  $BOS send $IN --amount 1 --max-fee 1 --message "No activity bewteen our channel for 30 days. Please review. Love from $MY_KEY"
  fi
 done
 
-# Rebalance with a random outbound node 
+# Rebalance with a random outbound node
 
 echo "Step 1 ... Ensure Local balance if channel local balance is < $IN_TARGET_OUTBOUND"
 echo "Working with ${#bringin_arr[@]} peers to increase outbound via ${#sendout_arr[@]} peers to decrease outbound"
@@ -289,11 +329,9 @@ for IN in "${bringin_arr[@]}"; do \
  #Select A random out peer
  OUT=${sendout_arr[j]};
 
- echo -e "\n 1.out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
+ #send a nudge
+ send_to_peer $OUT $IN $((NUDGE_AMOUNT+10)) $NUDGE_FEE 1 && rebalance $OUT $IN "--in-target-outbound CAPACITY*$IN_TARGET_OUTBOUND"
 
- echo -e "\n 1.in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
-
- $BOS rebalance --in $IN --out $OUT --in-target-outbound CAPACITY*$IN_TARGET_OUTBOUND --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
  date; sleep 1;
 done
 
@@ -305,11 +343,9 @@ for OUT in "${sendout_arr[@]}"; do \
  #Select A random in peer
  IN=${bringin_arr[j]};
 
- echo -e "\n 2.out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
+ #send a nudge
+ send_to_peer $OUT $IN $((NUDGE_AMOUNT+20)) $NUDGE_FEE 2 && rebalance $OUT $IN "--out-target-inbound CAPACITY/2"
 
- echo -e "\n 2.in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
-
- $BOS rebalance --in $IN --out $OUT --out-target-inbound CAPACITY/2 --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
  date; sleep 1;
 done
 
@@ -317,6 +353,7 @@ done
 
 MAX_FEE_RATE=$HIGH_MAX_FEE_RATE
 LIMIT_FEE_RATE=$HIGH_LIMIT_FEE_RATE
+NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
 echo "Step 3 ... Increasing outbound for channels we prefer to keep local"
 echo "Working with ${#forout_arr[@]} peers to increase outbound via ${#sendout_arr[@]} peers to decrease outbound"
@@ -326,11 +363,9 @@ for IN in "${forout_arr[@]}"; do \
  #Select A random out peer
  OUT=${sendout_arr[j]};
 
- echo -e "\n 3.out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
+ #send a nudge
+ send_to_peer $OUT $IN $((NUDGE_AMOUNT+30)) $NUDGE_FEE 3 && rebalance $OUT $IN "--in-target-outbound CAPACITY"
 
- echo -e "\n 3.in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
-
- $BOS rebalance --in $IN --out $OUT --in-target-outbound CAPACITY --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
  date; sleep 1;
 done
 
@@ -345,11 +380,9 @@ for OUT in "${forin_arr[@]}"; do \
  #Select A random in peer
  IN=${bringin_arr[j]};
 
- echo -e "\n 4.out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
+ #send a nudge
+ send_to_peer $OUT $IN $((NUDGE_AMOUNT+40)) $NUDGE_FEE 4 && rebalance $OUT $IN "--out-target-inbound CAPACITY"
 
- echo -e "\n 4.in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
-
- $BOS rebalance --in $IN --out $OUT --out-target-inbound CAPACITY --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
  date; sleep 1;
 
  #This section is only applicaation if you have channel with Chivo.
@@ -359,21 +392,36 @@ for OUT in "${forin_arr[@]}"; do \
 
   OUT=$CHIVO
 
-  echo -e "\n 4.1.out------> "$OUT"\n";  grep $OUT $MY_T_DIR/peers | tail -7;
+  #send a nudge
+  send_to_peer $OUT $IN $((NUDGE_AMOUNT+41)) $NUDGE_FEE 4.1 && rebalance $OUT $IN "--out-target-inbound CAPACITY"
 
-  echo -e "\n 4.1.in-------> "$IN"\n"; grep $IN $MY_T_DIR/peers | tail -7;
-
-  $BOS rebalance --in $IN --out $OUT --out-target-inbound CAPACITY --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $MAX_FEE_RATE --max-fee $MAX_FEE $AVOID;\
   date; sleep 1;
  fi
 done
+
+echo "Step 4.2 ... Increasing inbound for CHIVO via idle peers"
+echo "Working with ${#idle_arr[@]} peers to decrease inbound via $CHIVO to increase inbound"
+
+#This section is only applicaation if you have channel with Chivo.
+if [ $chivo_count -gt 0 ]
+then
+ #Try chivo wallet with the idle peer. (improve in future)
+ for IN in "${idle_arr[@]}"; do \
+  OUT=$CHIVO
+
+  #send a nudge with target rebalance
+  send_to_peer $OUT $IN $((NUDGE_AMOUNT+42)) $NUDGE_FEE 4.2 && rebalance $OUT $IN "--out-target-inbound CAPACITY"
+
+  date; sleep 1;
+ done
+fi
 
 #This section is only applicaation if you have channel with LOOP. Remember to increase fees with LOOP
 
 loop_count=`grep $LOOP $MY_T_DIR/peers | wc -l` 
 
 if [ $loop_count -gt 0 ]
-then 
+then
  echo "Step 5 ... Reduce Remote for LOOP"
  MAX_FEE_RATE=$LOOP_MAX_FEE_RATE
  LIMIT_FEE_RATE=$LOOP_LIMIT_FEE_RATE
