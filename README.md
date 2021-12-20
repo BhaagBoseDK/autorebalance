@@ -104,5 +104,7 @@ Change History:
 #0.1.8 - Nudge Idle for IN
        - Use Chivo for Idle in special loop
        - Send Idle Nudge
+#0.1.9 - Use MINIMUM LIQUIDITY to select suitable peers
+       - code cleanup added functions for each step.
 
 ```
