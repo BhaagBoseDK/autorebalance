@@ -106,5 +106,9 @@ Change History:
        - Send Idle Nudge
 #0.1.9 - Use MINIMUM LIQUIDITY to select suitable peers
        - code cleanup added functions for each step.
-
+#0.2.0 - Using unclassified peers in the high value rebalnce.
+       - init after each function
+       - Reorder sequence and other logics
+       - Check depleting peers after successful rebalance
+       - Random Reconnect
 ```
