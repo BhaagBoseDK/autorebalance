@@ -49,7 +49,6 @@
 # 0.2.1 - Step Text
 #       - Favour zerofees for --in peers
 #       - Avoid Not required if Global Avoid is defined (bos 11.16.1 onwards)
-#
 script_ver=0.2.1
 ##       - <to design> use avoid to rebalance key channels
 #
@@ -91,7 +90,7 @@ OUT_OVER_CAPACITY=0.5
 IN_TARGET_OUTBOUND=0.25
 
 # Add in AVOID conditions you want to add to all rebalances
-AVOID="--avoid stop"
+AVOID=" "
 
 # Peers to be omitted from outbound remabalancing. Add to --omit pubkey --omit pubkey syntax. If not specified all peers are considered. These are not used in --out
 gOMIT_OUT=" "
