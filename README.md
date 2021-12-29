@@ -111,4 +111,7 @@ Change History:
        - Reorder sequence and other logics
        - Check depleting peers after successful rebalance
        - Random Reconnect
+#0.2.1 - Step Text
+       - Favour zerofees for --in peers
+       - Avoid Not required if Global Avoid is defined (bos 11.16.1 onwards)
 ```
