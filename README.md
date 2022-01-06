@@ -114,4 +114,7 @@ Change History:
 #0.2.1 - Step Text
        - Favour zerofees for --in peers
        - Avoid Not required if Global Avoid is defined (bos 11.16.1 onwards)
+#0.2.2 - Fee Variables can be defined in environment now.
+       - Only init when required (after events which change channel capacity)
+       - Only do 25% of peers for Chivo
 ```

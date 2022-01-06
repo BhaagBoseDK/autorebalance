@@ -1,4 +1,4 @@
-#!/bin/bash
+	\#!/bin/bash
 # ------------------------------------------------------------------------------------------------
 # Usage:
 # This script run continuously to attempt to create a balanced node.
@@ -49,7 +49,10 @@
 # 0.2.1 - Step Text
 #       - Favour zerofees for --in peers
 #       - Avoid Not required if Global Avoid is defined (bos 11.16.1 onwards)
-script_ver=0.2.1
+# 0.2.2 - Fee Variables can be defined in environment now.
+#       - Only init when required (after events which change channel capacity)
+#       - Only do 25% of peers for Chivo
+script_ver=0.2.2
 ##       - <to design> use avoid to rebalance key channels
 #
 # ------------------------------------------------------------------------------------------------
@@ -57,37 +60,39 @@ script_ver=0.2.1
 
 min_bos_ver=11.16.1
 
-DEBUG=echo
+DEBUG=:
 
 # define constants
-declare -r TRUE=0
-declare -r FALSE=1
+declare -r TRUE=0;
+declare -r FALSE=1;
+RANDOM=$(date +%s);
 
 # Change These Parameters as per your requirements
 
-#If you DO NOT wish to tip 1 sat to author each time you run this script make this value 0. If you wish to increase the tip, change to whatever you want. 
+#If you DO NOT wish to tip 1 sat to author each time you run this script make this value 0. If you wish to increase the tip, change to whatever you want.
 TIP=1
 
 # Max_Fee is kept as high since we will control the rebalance with fee-rate. Change if reuired.
-MAX_FEE=50000
+MAX_FEE=500000
 
-#This is the maximum fee used in Step 3 and 4. Keep same if you want
-HIGH_MAX_FEE_RATE=1369
-HIGH_LIMIT_FEE_RATE=1369
+#This is the maximum fee used in for targeted rebalances (what earns you most fees).
+#Fee variables can be defined in environment so you do not have to change the values after each git pull.
+HIGH_MAX_FEE_RATE=${HIGH_MAX_FEE_RATE:-1369}
+HIGH_LIMIT_FEE_RATE=${HIGH_LIMIT_FEE_RATE:-$HIGH_MAX_FEE_RATE}
 
-#The normal Rebalance is at  1/3 of High fees
-LOW_MAX_FEE_RATE=$((HIGH_MAX_FEE_RATE/3))
-LOW_LIMIT_FEE_RATE=$((HIGH_LIMIT_FEE_RATE/3))
+#The normal/opportunistic Rebalance is at 1/4 of High fees
+LOW_MAX_FEE_RATE=${LOW_MAX_FEE_RATE:-$((HIGH_MAX_FEE_RATE/4))}
+LOW_LIMIT_FEE_RATE=${LOW_LIMIT_FEE_RATE:-$((HIGH_LIMIT_FEE_RATE/4))}
 
 #Loop fees are used for LOOP rebalance
-LOOP_MAX_FEE_RATE=2569
-LOOP_LIMIT_FEE_RATE=2169
+LOOP_MAX_FEE_RATE=${LOOP_MAX_FEE_RATE:-2569}
+LOOP_LIMIT_FEE_RATE=${LOOP_LIMIT_FEE_RATE:-$LOOP_MAX_FEE_RATE}
 
 #Consider these channels for decreasing local balance (move to remote) when outbound is above this limit
-OUT_OVER_CAPACITY=0.5
+OUT_OVER_CAPACITY=0.6
 
 # Target rebalance to this capacity of Local. Keep this below 0.5 (50%)
-IN_TARGET_OUTBOUND=0.25
+IN_TARGET_OUTBOUND=0.20
 
 # Add in AVOID conditions you want to add to all rebalances
 AVOID=" "
@@ -154,6 +159,7 @@ fi
 
 echo "========= START UP ==========="
 echo "==== version $script_ver ===="
+echo ".. Working with fee rates $LOW_MAX_FEE_RATE:$LOW_LIMIT_FEE_RATE, $HIGH_MAX_FEE_RATE:$HIGH_LIMIT_FEE_RATE, $LOOP_MAX_FEE_RATE:$LOOP_LIMIT_FEE_RATE"
 date
 
 bos_ver=`$BOS -V`
@@ -182,10 +188,21 @@ MY_T_DIR=$(mktemp -dt "autorebalance.XXXXXXXX" $T_DIR)
 
 echo "Temporary Working Area $MY_T_DIR ... if you terminate the script, do remember to clean manually"
 
+init_required=$TRUE
+
 # functions ...............
 
 function init()
 {
+
+ if [ $init_required = $TRUE ]
+ then
+  init_required=$FALSE
+ else
+  echo ".... init not required, continuing"
+  return $TRUE
+ fi
+
  local i;
  date;
  echo "Initialising rebalancing arrays and data ..."
@@ -198,6 +215,9 @@ function init()
   $BOS peers > $MY_T_DIR/peers 2>&1
  fi
 
+ OMIT_OUT=$gOMIT_OUT
+ OMIT_IN=$gOMIT_IN
+
  if [ "$TAG_FOR_OUT" != " " ]
  then
   forout_arr=(`$BOS peers --no-color --complete $TAG_FOR_OUT \
@@ -205,13 +225,10 @@ function init()
   #divide by 2 beause --omit is added
   echo "Found $((${#forout_arr[@]}/2)) special peers to keep local, do not use in --out"
 
-  OMIT_OUT=$gOMIT_OUT
-  OMIT_IN=$gOMIT_IN
-
   OMIT_OUT+=${forout_arr[@]}
 
   # Now get peers for out with available inbound.
-  forout_arr=(`$BOS peers --no-color --complete --active --filter "INBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" $TAG_FOR_OUT \
+  forout_arr=(`$BOS peers --no-color --complete --sort outbound_liquidity --active --filter "INBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" $TAG_FOR_OUT \
   | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
   echo "... of which found ${#forout_arr[@]} special peers to keep local with inbound > 1.69*$MINIMUM_LIQUIDITY, do not use in --out"
@@ -229,7 +246,7 @@ function init()
   OMIT_IN+=${forin_arr[@]}
 
   # Now get peers for in with available outbound.
-  forin_arr=(`$BOS peers --no-color --complete --active --filter "OUTBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" $TAG_FOR_IN \
+  forin_arr=(`$BOS peers --no-color --complete --sort inbound_liquidity --active --filter "OUTBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" $TAG_FOR_IN \
   | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
   echo "... of which found ${#forin_arr[@]} special peers to keep remote with outbound > 1.69*$MINIMUM_LIQUIDITY, do not use in --in"
@@ -237,7 +254,7 @@ function init()
  #$DEBUG $OMIT_IN
 
  # Get zero fee peers towards our node
- zerofeetoout_arr=(`$BOS peers --no-color --complete --active $OMIT_OUT $OMIT_IN --filter "INBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" \
+ zerofeetoout_arr=(`$BOS peers --no-color --complete --sort outbound_liquidity --active $OMIT_OUT $OMIT_IN --filter "INBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" \
   | grep -e "inbound_fee_rate:" -e "public_key:" | grep -v "partner_public_key:" | grep "(0)" -A1  | grep "public_key:" | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
  echo "found ${#zerofeetoout_arr[@]} zero in fee peers for rebalance to local with inbound > 1.69*$MINIMUM_LIQUIDITY, for use in --in"
@@ -275,24 +292,28 @@ function init()
 
  #Get peers with high outbound to send to remote
 
- sendtoin_arr=(`$BOS peers --no-color --complete --active --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT_OUT $OMIT_IN \
+ local tmp_sendtoin_arr=(`$BOS peers --no-color --complete --active --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT_OUT $OMIT_IN \
  | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
- echo "Found ${#sendtoin_arr[@]} with OUTBOUND > $OUT_OVER_CAPACITY to send to remote, do not use in --in"
+ echo "Found ${#tmp_sendtoin_arr[@]} with OUTBOUND > $OUT_OVER_CAPACITY to send to remote, do not use in --in"
  #Add peers which we prefer to send out
+ unset sendtoin_arr
  sendtoin_arr+=(${forin_arr[@]})
+ sendtoin_arr+=(${tmp_sendtoin_arr[@]})
  sendtoin_arr+=(${idletoin_arr[@]})
 
  echo "Working with ${#sendtoin_arr[@]} peers to rebalance to remote ... final total, do not use in --in"
 
  #Get all low outbound channels 70% below minimum to increase local.
- bringtoout_arr=(`$BOS peers --no-color --complete --active --sort outbound_liquidity --filter "OUTBOUND_LIQUIDITY<(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$IN_TARGET_OUTBOUND*7/10" $OMIT_IN $OMIT_OUT \
+ local tmp_bringtoout_arr=(`$BOS peers --no-color --complete --active --sort outbound_liquidity --filter "OUTBOUND_LIQUIDITY<(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$IN_TARGET_OUTBOUND*7/10" $OMIT_IN $OMIT_OUT \
  | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
- echo "Found ${#bringtoout_arr[@]} with OUTBOUND < $IN_TARGET_OUTBOUND to bring to local, do not use in --out"
+ echo "Found ${#tmp_bringtoout_arr[@]} with OUTBOUND < $IN_TARGET_OUTBOUND to bring to local, do not use in --out"
 
  #Add peers which we prefer to bring in
+ unset bringtoout_arr
  bringtoout_arr+=(${forout_arr[@]})
+ bringtoout_arr+=(${tmp_bringtoout_arr[@]})
  bringtoout_arr+=(${idletoout_arr[@]})
 
  echo "Working with ${#bringtoout_arr[@]} peers to rebalance to local ... final total, do not use in --out"
@@ -341,6 +362,7 @@ function check_peer_capacity()
   return $TRUE
  fi
  echo ".... peer is depleted"
+ init_required=$TRUE
  return $FALSE
 }
 
@@ -364,9 +386,9 @@ function send_to_peer()
   return $FALSE
  fi
 
- echo  -e "\n ... $BOS send $MY_KEY --amount $SEND_AMOUNT --max-fee $MAX_FEE_SEND --out $OUT --in $IN $AVOID && return $TRUE || return $FALSE"
+ echo  -e "\n ... $BOS send $MY_KEY --amount $SEND_AMOUNT --max-fee $MAX_FEE_SEND --out $OUT --in $IN $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE"
 
- $BOS send $MY_KEY --amount $SEND_AMOUNT --max-fee $MAX_FEE_SEND --out $OUT --in $IN $AVOID && return $TRUE || return $FALSE
+ $BOS send $MY_KEY --amount $SEND_AMOUNT --max-fee $MAX_FEE_SEND --out $OUT --in $IN $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE
 }
 
 function rebalance()
@@ -384,18 +406,18 @@ function rebalance()
   return $FALSE
  fi
 
- echo -e "\n ... $BOS rebalance --in $IN --out $OUT $TARGET --avoid FEE_RATE>$LIMIT_FEE_RATE/$IN --avoid $OUT/FEE_RATE>$LIMIT_FEE_RATE --max-fee-rate $FEE_RATE --max-fee $FEE $AVOID && return $TRUE || return $FALSE"
+ echo -e "\n ... $BOS rebalance --in $IN --out $OUT $TARGET --avoid FEE_RATE>$LIMIT_FEE_RATE/$IN --avoid $OUT/FEE_RATE>$LIMIT_FEE_RATE --max-fee-rate $FEE_RATE --max-fee $FEE $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE"
 
- $BOS rebalance --in $IN --out $OUT $TARGET --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $FEE_RATE --max-fee $FEE $AVOID && return $TRUE || return $FALSE
+ $BOS rebalance --in $IN --out $OUT $TARGET --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $FEE_RATE --max-fee $FEE $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE
 }
 
 function random_reconnect()
 {
  # Run bos reconnect one out of 5 runs
- j=$((RANDOM % 5))
+ j=$((RANDOM % 21))
  if [ $j = 0 ]
  then
-  echo "... reconnecting inactive peers"
+  date; echo "... reconnecting inactive peers"
   $BOS reconnect
  fi
 }
@@ -518,7 +540,7 @@ function ensure_minimum_local()
  NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
  counter=0
- for IN in "${bringtoout_arr[@]}"; 
+ for IN in "${bringtoout_arr[@]}";
  do
   ((counter+=1)); echo ".... peer $counter of ${#bringtoout_arr[@]}"
   j=$(($RANDOM % ${#sendtoin_arr[@]}));
@@ -597,10 +619,10 @@ function ab_for_out()
  step=${1:-99}
  step_txt=${2:-X}
  #Add the rest array to increase chances.
- sendtoin_arr+=(${therest_arr[@]})
+ local t_sendtoin_arr=(${sendtoin_arr[@]}); t_sendtoin_arr+=(${therest_arr[@]});
 
  echo "Step $step:$step_txt ... Increasing outbound for channels we prefer to keep local"
- echo "Working with ${#forout_arr[@]} --in peers to increase outbound via ${#sendtoin_arr[@]} --out peers to decrease outbound"
+ echo "Working with ${#forout_arr[@]} --in peers to increase outbound via ${#t_sendtoin_arr[@]} --out peers to decrease outbound"
 
  MAX_FEE_RATE=$HIGH_MAX_FEE_RATE
  LIMIT_FEE_RATE=$HIGH_LIMIT_FEE_RATE
@@ -611,9 +633,9 @@ function ab_for_out()
  do
   ((counter+=1)); echo ".... peer $counter of ${#forout_arr[@]}"
 
-  j=$(($RANDOM % ${#sendtoin_arr[@]}));
+  j=$(($RANDOM % ${#t_sendtoin_arr[@]}));
   #Select A random out peer
-  OUT=${sendtoin_arr[j]};
+  OUT=${t_sendtoin_arr[j]};
 
   #send a nudge
   send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
@@ -634,10 +656,10 @@ function ab_for_in()
  step=${1:-99}
  step_txt=${2:-X}
  #Add the rest array to increase chances.
- bringtoout_arr+=(${therest_arr[@]})
+ local t_bringtoout_arr=(${bringtoout_arr[@]}); t_bringtoout_arr+=(${therest_arr[@]});
 
  echo "Step $step:$step_txt ... Increasing remote for channels we prefer to keep remote"
- echo "Working with ${#forin_arr[@]} --out peers to increase inbound via ${#bringtoout_arr[@]} --in peers to decrease inbound"
+ echo "Working with ${#forin_arr[@]} --out peers to increase inbound via ${#t_bringtoout_arr[@]} --in peers to decrease inbound"
 
  MAX_FEE_RATE=$HIGH_MAX_FEE_RATE
  LIMIT_FEE_RATE=$HIGH_LIMIT_FEE_RATE
@@ -666,9 +688,9 @@ function ab_for_in()
    date; sleep 1;
   fi
   # Now try with other peers.
-  j=$(($RANDOM % ${#bringtoout_arr[@]}));
+  j=$(($RANDOM % ${#t_bringtoout_arr[@]}));
   #Select A random in peer
-  IN=${bringtoout_arr[j]};
+  IN=${t_bringtoout_arr[j]};
 
   #send a nudge
   send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
@@ -688,11 +710,8 @@ function process_chivo()
 {
  step=${1:-99}
  step_txt=${2:-X}
- #Add the rest array to increase chances.
- bringtoout_arr+=(${therest_arr[@]})
 
- echo "Step $step:$step_txt ... Increasing inbound for CHIVO via ${#bringtoout_arr[@]} peers except sendtoin"
- echo "Working with ${#bringtoout_arr[@]} --in peers to decrease inbound via --out $CHIVO to increase inbound"
+ echo "Step $step:$step_txt ... Increasing inbound for CHIVO"
 
  MAX_FEE_RATE=$HIGH_MAX_FEE_RATE
  LIMIT_FEE_RATE=$HIGH_LIMIT_FEE_RATE
@@ -701,6 +720,7 @@ function process_chivo()
  #This section is only applicaation if you have channel with Chivo.
  if [[ ${forin_arr[*]} =~ $CHIVO ]]
  then
+
   OUT=$CHIVO
   counter=0
   # Prioritise zero fee peers
@@ -720,10 +740,18 @@ function process_chivo()
    date; sleep 1;
   done
   #Now try other peers
+  #Add the rest array to increase chances.
+  local t_bringtoout_arr=(${bringtoout_arr[@]}); t_bringtoout_arr+=(${therest_arr[@]});
+  echo "Working with ${#t_bringtoout_arr[@]} --in peers to decrease inbound via --out $CHIVO to increase inbound"
+
   counter=0
-  for IN in "${bringtoout_arr[@]}"
+  # Select 25% random peers
+  random_peers=($(shuf -i 0-$((${#t_bringtoout_arr[@]}-1)) -n $((${#t_bringtoout_arr[@]}/4))));
+
+  for i in "${random_peers[@]}"
   do
-   ((counter+=1)); echo ".... peer $counter of ${#bringtoout_arr[@]}"
+   ((counter+=1)); echo ".... $counter of $((${#t_bringtoout_arr[@]}/4)) random peer $i of ${#t_bringtoout_arr[@]}"
+   IN=${t_bringtoout_arr[i]}
    #send a nudge with target rebalance
    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
     { rebalance $OUT $IN "--out-target-inbound CAPACITY" &&
@@ -746,22 +774,23 @@ function process_loop()
 {
  step=${1:-99}
  step_txt=${2:-X}
- #Add the rest array to increase chances.
- sendtoin_arr+=(${therest_arr[@]})
 
  if [[ ${forout_arr[*]} =~ $LOOP ]]
  then
-  echo "Step $step:$step_txt ... Reduce Remote for --in LOOP via ${#sendtoin_arr[@]} --out peers"
+
+  #Add the rest array to increase chances.
+  local t_sendtoin_arr=(${sendtoin_arr[@]}); t_sendtoin_arr+=(${therest_arr[@]});
+  echo "Step $step:$step_txt ... Reduce Remote for --in LOOP via ${#t_sendtoin_arr[@]} --out peers"
 
   MAX_FEE_RATE=$LOOP_MAX_FEE_RATE
   LIMIT_FEE_RATE=$LOOP_LIMIT_FEE_RATE
   NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
   counter=0
-  for OUT in "${sendtoin_arr[@]}"
+  for OUT in "${t_sendtoin_arr[@]}"
   do
 
-   ((counter+=1)); echo ".... peer $counter of ${#sendtoin_arr[@]}"
+   ((counter+=1)); echo ".... peer $counter of ${#t_sendtoin_arr[@]}"
 
    IN=$LOOP
    # Loop does not accept keysend once it does change ; to &&
@@ -814,17 +843,19 @@ random_reconnect
 step_count=0
 #For each step, execute init followed by step
 for run_func in "process_loop" "process_chivo" "ab_for_in" "ab_for_out" "sendtoin_high_local" "ensure_minimum_local" "idle_to_in" "idle_to_out"
+#for run_func in "idle_to_out"
 do
- echo "Starting step ... $step_count : $run_func"
+ echo "Initialising step ... $step_count : $run_func"
  if init
  then
   echo "Starting step ... $step_count:$run_func"
-  $run_func $step_count $run_func
+  $DEBUG "$run_func $step_count $run_func"
+  $run_func $step_count "$run_func"
  else
   echo "... not much to do"
   break
  fi
- ((step_count+=1))
+ (( step_count+=1 ));
 done
 
 tip
