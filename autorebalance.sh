@@ -1,4 +1,4 @@
-	\#!/bin/bash
+#!/bin/bash
 # ------------------------------------------------------------------------------------------------
 # Usage:
 # This script run continuously to attempt to create a balanced node.
@@ -52,7 +52,8 @@
 # 0.2.2 - Fee Variables can be defined in environment now.
 #       - Only init when required (after events which change channel capacity)
 #       - Only do 25% of peers for Chivo
-script_ver=0.2.2
+# 0.2.3 - <>
+script_ver=0.2.3
 ##       - <to design> use avoid to rebalance key channels
 #
 # ------------------------------------------------------------------------------------------------
