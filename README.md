@@ -117,4 +117,6 @@ Change History:
 #0.2.2 - Fee Variables can be defined in environment now.
        - Only init when required (after events which change channel capacity)
        - Only do 25% of peers for Chivo
+#0.2.3 - Place for two way channels
+       - Sniper Mode (keep hitting until capacity reached)
 ```

@@ -52,7 +52,8 @@
 # 0.2.2 - Fee Variables can be defined in environment now.
 #       - Only init when required (after events which change channel capacity)
 #       - Only do 25% of peers for Chivo
-# 0.2.3 - <>
+# 0.2.3 - Place for two way channels
+#       - Sniper Mode (keep hitting until capacity reached)
 script_ver=0.2.3
 ##       - <to design> use avoid to rebalance key channels
 #
@@ -78,7 +79,7 @@ MAX_FEE=500000
 
 #This is the maximum fee used in for targeted rebalances (what earns you most fees).
 #Fee variables can be defined in environment so you do not have to change the values after each git pull.
-HIGH_MAX_FEE_RATE=${HIGH_MAX_FEE_RATE:-1369}
+HIGH_MAX_FEE_RATE=${HIGH_MAX_FEE_RATE:-1169}
 HIGH_LIMIT_FEE_RATE=${HIGH_LIMIT_FEE_RATE:-$HIGH_MAX_FEE_RATE}
 
 #The normal/opportunistic Rebalance is at 1/4 of High fees
@@ -90,10 +91,13 @@ LOOP_MAX_FEE_RATE=${LOOP_MAX_FEE_RATE:-2569}
 LOOP_LIMIT_FEE_RATE=${LOOP_LIMIT_FEE_RATE:-$LOOP_MAX_FEE_RATE}
 
 #Consider these channels for decreasing local balance (move to remote) when outbound is above this limit
-OUT_OVER_CAPACITY=0.6
+OUT_OVER_CAPACITY=0.7
 
 # Target rebalance to this capacity of Local. Keep this below 0.5 (50%)
 IN_TARGET_OUTBOUND=0.20
+
+# Target rebalance for 2 way channels
+TWO_WAY_TARGET=0.5
 
 # Add in AVOID conditions you want to add to all rebalances
 AVOID=" "
@@ -111,6 +115,7 @@ gOMIT_IN=" "
 # Change the tag name here if you have other names for similar purpose you can add multiple with --tag tagname syntax. Make it " " if no tags are required.
 TAG_FOR_OUT="--tag ab_for_out"
 TAG_FOR_IN="--tag ab_for_in"
+TAG_FOR_2W="--tag ab_for_2w"
 
 #Minimum liquidity required on the direction for rebalance.
 MINIMUM_LIQUIDITY=216942
@@ -128,6 +133,9 @@ CHIVO="02f72978d40efeffca537139ad6ac9f09970c000a2dbc0d7aa55a71327c4577a80"
 IDLE_DAYS=14
 NUDGE_AMOUNT=69420
 NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
+
+#Sniper Mode will repeat until rebalanced to desired capacity (only applied for high value rebalances)
+SNIPER=$TRUE
 
 # ------------ START OF SCRIPT ------------
 #Set possible BOS paths
@@ -222,7 +230,7 @@ function init()
  if [ "$TAG_FOR_OUT" != " " ]
  then
   forout_arr=(`$BOS peers --no-color --complete $TAG_FOR_OUT \
-  | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print "--omit "$2}'`)
+  | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print " --omit "$2}'`)
   #divide by 2 beause --omit is added
   echo "Found $((${#forout_arr[@]}/2)) special peers to keep local, do not use in --out"
 
@@ -240,7 +248,7 @@ function init()
  if [ "$TAG_FOR_IN" != " " ]
  then
   forin_arr=(`$BOS peers --no-color --complete $TAG_FOR_IN \
-  | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print "--omit "$2}'`)
+  | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print " --omit "$2}'`)
 
   echo "Found $((${#forin_arr[@]}/2)) special peers to keep remote, do not use in --in"
 
@@ -254,8 +262,28 @@ function init()
  fi
  #$DEBUG $OMIT_IN
 
+ #Two Way channels are to be brought to out (i.e. if they move to remote) and will be used in --in. It is assumed that two way channels move naturally out.
+ #A misconfigured 2 way channel can get stuck with all local in which case remove it from 2 way tag.
+
+ if [ "$TAG_FOR_2W" != " " ]
+ then
+  twoway_arr=(`$BOS peers --no-color --complete $TAG_FOR_2W \
+  | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print " --omit "$2}'`)
+  #divide by 2 beause --omit is added
+  echo "Found $((${#twoway_arr[@]}/2)) special peers to keep balanced 2 way, do not use in --out"
+
+  OMIT_OUT+=" "${twoway_arr[@]}
+
+  # Now get peers for out with available inbound.
+  twoway_arr=(`$BOS peers --no-color --complete --sort outbound_liquidity --active --filter "INBOUND_LIQUIDITY>1.21*(INBOUND_LIQUIDITY+OUTBOUND_LIQUIDITY)*$TWO_WAY_TARGET" $TAG_FOR_2W \
+  | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
+
+  echo "... of which found ${#twoway_arr[@]} special peers to bring to local with inbound > 1.21*CAPACITY*$TWO_WAY_TARGET, do not use in --out"
+ fi
+
+ $DEBUG $OMIT_OUT $OMIN_IN
  # Get zero fee peers towards our node
- zerofeetoout_arr=(`$BOS peers --no-color --complete --sort outbound_liquidity --active $OMIT_OUT $OMIT_IN --filter "INBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" \
+ zerofeetoout_arr=(`$BOS peers --no-color --complete --sort outbound_liquidity --active $OMIT_IN --filter "INBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" \
   | grep -e "inbound_fee_rate:" -e "public_key:" | grep -v "partner_public_key:" | grep "(0)" -A1  | grep "public_key:" | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
  echo "found ${#zerofeetoout_arr[@]} zero in fee peers for rebalance to local with inbound > 1.69*$MINIMUM_LIQUIDITY, for use in --in"
@@ -314,6 +342,7 @@ function init()
  #Add peers which we prefer to bring in
  unset bringtoout_arr
  bringtoout_arr+=(${forout_arr[@]})
+ bringtoout_arr+=(${twoway_arr[@]})
  bringtoout_arr+=(${tmp_bringtoout_arr[@]})
  bringtoout_arr+=(${idletoout_arr[@]})
 
@@ -322,6 +351,7 @@ function init()
  # Save key arrays to file for Debug later
  echo "${forout_arr[@]}" | sed 's/ 0/\n0/g' > $MY_T_DIR/forout.$step_count
  echo "${forin_arr[@]}" | sed 's/ 0/\n0/g' > $MY_T_DIR/forin.$step_count
+ echo "${twoway_arr[@]}" | sed 's/ 0/\n0/g' > $MY_T_DIR/twoway.$step_count
  echo "${therest_arr[@]}" | sed 's/ 0/\n0/g' > $MY_T_DIR/therest.$step_count
  echo "${idletoin_arr[@]}" | sed 's/ 0/\n0/g' > $MY_T_DIR/idletoin.$step_count
  echo "${idletoout_arr[@]}" | sed 's/ 0/\n0/g' > $MY_T_DIR/idletoout.$step_count
@@ -614,6 +644,54 @@ function sendtoin_high_local()
  done
 }
 
+#The following rebalances are done spefically for ab_for_2w tags. You might want to change the fees if you prefer.
+function ab_for_2w()
+{
+ step=${1:-99}
+ step_txt=${2:-X}
+ #Add the rest array to increase chances.
+ local t_sendtoin_arr=(${sendtoin_arr[@]}); t_sendtoin_arr+=(${therest_arr[@]});
+
+ echo "Step $step:$step_txt ... Increasing outbound for channels we prefer to keep two way"
+ echo "Working with ${#twoway_arr[@]} --in peers to increase outbound for 2 way balance via ${#t_sendtoin_arr[@]} --out peers to decrease outbound"
+
+ MAX_FEE_RATE=$HIGH_MAX_FEE_RATE
+ LIMIT_FEE_RATE=$HIGH_LIMIT_FEE_RATE
+ NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
+
+ counter=0
+ local send
+ for IN in "${twoway_arr[@]}";
+ do
+  send=$TRUE;((counter+=1)); echo ".... peer $counter of ${#twoway_arr[@]}"
+  while true
+  do
+   j=$(($RANDOM % ${#t_sendtoin_arr[@]}));
+   #Select A random out peer
+   OUT=${t_sendtoin_arr[j]};
+
+   #send a nudge
+   send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
+    { rebalance $OUT $IN "--in-target-outbound CAPACITY*$TWO_WAY_TARGET" &&
+      { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" ||
+        { echo "... Peer $OUT depleted ... reinitialise ...";
+          init || break 2;
+        }
+      } || { echo "... rebalance failed"; send=$FALSE; }
+    } || { echo "... send failed"; send=$FALSE; }
+
+   date; sleep 1;
+   #Exit from While True
+   if [[ $SNIPER = $TRUE && $send = $TRUE ]]
+   then
+    echo ".... Sniper Activated - retry"
+   else
+    break;
+   fi
+  done
+ done
+}
+
 #The following rebalances are done spefically for ab_for_out and ab_for_in tags. You might want to change the fees if you prefer.
 function ab_for_out()
 {
@@ -630,25 +708,35 @@ function ab_for_out()
  NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
  counter=0
+ local send
  for IN in "${forout_arr[@]}"; 
  do
-  ((counter+=1)); echo ".... peer $counter of ${#forout_arr[@]}"
+  send=$TRUE; ((counter+=1)); echo ".... peer $counter of ${#forout_arr[@]}"
+  while true
+  do
+   j=$(($RANDOM % ${#t_sendtoin_arr[@]}));
+   #Select A random out peer
+   OUT=${t_sendtoin_arr[j]};
 
-  j=$(($RANDOM % ${#t_sendtoin_arr[@]}));
-  #Select A random out peer
-  OUT=${t_sendtoin_arr[j]};
+   #send a nudge
+   send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
+    { rebalance $OUT $IN "--in-target-outbound CAPACITY" &&
+      { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" ||
+        { echo "... Peer $OUT depleted ... reinitialise ...";
+          init || break 2;
+        }
+      } || echo "... rebalance failed";
+    } || { echo "... send failed"; send=$FALSE; }
 
-  #send a nudge
-  send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
-   { rebalance $OUT $IN "--in-target-outbound CAPACITY" &&
-     { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" ||
-       { echo "... Peer $OUT depleted ... reinitialise ...";
-         init || break;
-       }
-     } || echo "... rebalance failed";
-   } || echo "... send failed";
-
-  date; sleep 1;
+   date; sleep 1;
+   #Exit from While True
+   if [[ $SNIPER = $TRUE && $send = $TRUE  ]]
+   then
+    echo ".... Sniper Activated - retry"
+   else
+    break;
+   fi
+  done
  done
 }
 
@@ -667,43 +755,57 @@ function ab_for_in()
  NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
  counter=0
+ local send_zero;
+ local send;
+
  for OUT in "${forin_arr[@]}";
  do
-  ((counter+=1)); echo ".... peer $counter of ${#forin_arr[@]}"
-  if [ ${#zerofeetoout_arr[@]} -gt 0 ]
-  then
-   #prioritise zero fee peers
-   j=$(($RANDOM % ${#zerofeetoout_arr[@]}));
-   # Prioritise zero fee first
-   IN=${zerofeetoout_arr[j]};
-   #send a nudge and if success rebalance
+  send_zero=$TRUE; send=$TRUE; ((counter+=1)); echo ".... peer $counter of ${#forin_arr[@]}"
+  #While is exit at the end
+  while true
+  do
+   if [ ${#zerofeetoout_arr[@]} -gt 0 ]
+   then
+    #prioritise zero fee peers
+    j=$(($RANDOM % ${#zerofeetoout_arr[@]}));
+    # Prioritise zero fee first
+    IN=${zerofeetoout_arr[j]};
+    #send a nudge and if success rebalance
+    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
+     { rebalance $OUT $IN "--out-target-inbound CAPACITY" &&
+      { check_peer_capacity $IN "INBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" ||
+        { echo "... Peer $IN depleted ... reinitialise ...";
+          init || break 2;
+        }
+      } || echo "... rebalance failed";
+     } || { echo "... send failed"; send_zero=$FALSE; }
+
+    date; sleep 1;
+   fi
+   # Now try with other peers.
+   j=$(($RANDOM % ${#t_bringtoout_arr[@]}));
+   #Select A random in peer
+   IN=${t_bringtoout_arr[j]};
+
+   #send a nudge
    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
     { rebalance $OUT $IN "--out-target-inbound CAPACITY" &&
       { check_peer_capacity $IN "INBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" ||
         { echo "... Peer $IN depleted ... reinitialise ...";
-          init || break;
+          init || break 2;
         }
       } || echo "... rebalance failed";
-    } || echo "... send failed";
+    } || { echo "... send failed"; send=$FALSE; }
 
    date; sleep 1;
-  fi
-  # Now try with other peers.
-  j=$(($RANDOM % ${#t_bringtoout_arr[@]}));
-  #Select A random in peer
-  IN=${t_bringtoout_arr[j]};
-
-  #send a nudge
-  send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
-   { rebalance $OUT $IN "--out-target-inbound CAPACITY" &&
-     { check_peer_capacity $IN "INBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" ||
-       { echo "... Peer $IN depleted ... reinitialise ...";
-         init || break;
-       }
-     } || echo "... rebalance failed";
-   } || echo "... send failed";
-
-  date; sleep 1;
+   #Exit from While True
+   if [[ $SNIPER = $TRUE && ( $send_zero = $TRUE || $send = $TRUE ) ]]
+   then
+    echo ".... Sniper Activated - retry"
+   else
+    break;
+   fi
+  done
  done
 }
 
@@ -843,8 +945,9 @@ random_reconnect
 
 step_count=0
 #For each step, execute init followed by step
-for run_func in "process_loop" "process_chivo" "ab_for_in" "ab_for_out" "sendtoin_high_local" "ensure_minimum_local" "idle_to_in" "idle_to_out"
-#for run_func in "idle_to_out"
+
+for run_func in "process_loop" "process_chivo" "ab_for_in" "ab_for_out" "ab_for_2w" "sendtoin_high_local" "ensure_minimum_local" "idle_to_in" "idle_to_out"
+#for run_func in "ab_for_2w"
 do
  echo "Initialising step ... $step_count : $run_func"
  if init
