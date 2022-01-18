@@ -119,4 +119,5 @@ Change History:
        - Only do 25% of peers for Chivo
 #0.2.3 - Place for two way channels
        - Sniper Mode (keep hitting until capacity reached)
+#0.2.4 - Minimimm Liquidity related minor adjustments.
 ```

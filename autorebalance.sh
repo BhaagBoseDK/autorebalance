@@ -54,7 +54,9 @@
 #       - Only do 25% of peers for Chivo
 # 0.2.3 - Place for two way channels
 #       - Sniper Mode (keep hitting until capacity reached)
-script_ver=0.2.3
+# 0.2.4 - Minimimm Liquidity related minor adjustments.
+#       - <>
+script_ver=0.2.4
 ##       - <to design> use avoid to rebalance key channels
 #
 # ------------------------------------------------------------------------------------------------
@@ -79,7 +81,11 @@ MAX_FEE=500000
 
 #This is the maximum fee used in for targeted rebalances (what earns you most fees).
 #Fee variables can be defined in environment so you do not have to change the values after each git pull.
-HIGH_MAX_FEE_RATE=${HIGH_MAX_FEE_RATE:-1169}
+#BaseFee is highest rebalance rate used as 70% of your earning ppm.
+
+BASE_FEE=$((2069*65/100))
+
+HIGH_MAX_FEE_RATE=${HIGH_MAX_FEE_RATE:-$BASE_FEE}
 HIGH_LIMIT_FEE_RATE=${HIGH_LIMIT_FEE_RATE:-$HIGH_MAX_FEE_RATE}
 
 #The normal/opportunistic Rebalance is at 1/4 of High fees
@@ -91,10 +97,10 @@ LOOP_MAX_FEE_RATE=${LOOP_MAX_FEE_RATE:-2569}
 LOOP_LIMIT_FEE_RATE=${LOOP_LIMIT_FEE_RATE:-$LOOP_MAX_FEE_RATE}
 
 #Consider these channels for decreasing local balance (move to remote) when outbound is above this limit
-OUT_OVER_CAPACITY=0.7
+OUT_OVER_CAPACITY=0.5
 
 # Target rebalance to this capacity of Local. Keep this below 0.5 (50%)
-IN_TARGET_OUTBOUND=0.20
+IN_TARGET_OUTBOUND=0.15
 
 # Target rebalance for 2 way channels
 TWO_WAY_TARGET=0.5
@@ -118,7 +124,7 @@ TAG_FOR_IN="--tag ab_for_in"
 TAG_FOR_2W="--tag ab_for_2w"
 
 #Minimum liquidity required on the direction for rebalance.
-MINIMUM_LIQUIDITY=216942
+MINIMUM_LIQUIDITY=$((216942*269/100))
 
 #If you run bos in a specific manner or have alias defined for bos, type the same here and uncomment the line (replace #myBOS= by myBOS= and provide your bos path)
 #myBOS="your installation specific way to run bos"
@@ -168,7 +174,7 @@ fi
 
 echo "========= START UP ==========="
 echo "==== version $script_ver ===="
-echo ".. Working with fee rates $LOW_MAX_FEE_RATE:$LOW_LIMIT_FEE_RATE, $HIGH_MAX_FEE_RATE:$HIGH_LIMIT_FEE_RATE, $LOOP_MAX_FEE_RATE:$LOOP_LIMIT_FEE_RATE"
+echo ".. Working with $BASE_FEE base fee rates applying max $LOW_MAX_FEE_RATE:$LOW_LIMIT_FEE_RATE, $HIGH_MAX_FEE_RATE:$HIGH_LIMIT_FEE_RATE, $LOOP_MAX_FEE_RATE:$LOOP_LIMIT_FEE_RATE"
 date
 
 bos_ver=`$BOS -V`
@@ -267,10 +273,10 @@ function init()
 
  if [ "$TAG_FOR_2W" != " " ]
  then
-  twoway_arr=(`$BOS peers --no-color --complete $TAG_FOR_2W \
+  twoway_arr=(`$BOS peers --no-color --complete $TAG_FOR_2W --sort outbound_liquidity --filter "INBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY"\
   | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print " --omit "$2}'`)
   #divide by 2 beause --omit is added
-  echo "Found $((${#twoway_arr[@]}/2)) special peers to keep balanced 2 way, do not use in --out"
+  echo "Found $((${#twoway_arr[@]}/2)) special peers to keep balanced 2-way with inbound > 1.69*$MINIMUM_LIQUIDITY, do not use in --out"
 
   OMIT_OUT+=" "${twoway_arr[@]}
 
@@ -278,26 +284,26 @@ function init()
   twoway_arr=(`$BOS peers --no-color --complete --sort outbound_liquidity --active --filter "INBOUND_LIQUIDITY>1.21*(INBOUND_LIQUIDITY+OUTBOUND_LIQUIDITY)*$TWO_WAY_TARGET" $TAG_FOR_2W \
   | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
-  echo "... of which found ${#twoway_arr[@]} special peers to bring to local with inbound > 1.21*CAPACITY*$TWO_WAY_TARGET, do not use in --out"
+  echo "... of which found ${#twoway_arr[@]} 2-way balance special peers to bring to local with inbound > 1.21*CAPACITY*$TWO_WAY_TARGET"
  fi
 
  $DEBUG $OMIT_OUT $OMIN_IN
  # Get zero fee peers towards our node
- zerofeetoout_arr=(`$BOS peers --no-color --complete --sort outbound_liquidity --active $OMIT_IN --filter "INBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" \
+ zerofeetoout_arr=(`$BOS peers --no-color --complete --sort outbound_liquidity --active $OMIT_IN --filter "INBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" \
   | grep -e "inbound_fee_rate:" -e "public_key:" | grep -v "partner_public_key:" | grep "(0)" -A1  | grep "public_key:" | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
- echo "found ${#zerofeetoout_arr[@]} zero in fee peers for rebalance to local with inbound > 1.69*$MINIMUM_LIQUIDITY, for use in --in"
+ echo "Found ${#zerofeetoout_arr[@]} zero in fee peers for rebalance to local with inbound > $MINIMUM_LIQUIDITY, for use in --in"
 
  # Get peers which are neither in nor out
- therest_arr=(`$BOS peers --no-color --complete --active $OMIT_OUT $OMIT_IN --filter "OUTBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" --filter "INBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" \
+ therest_arr=(`$BOS peers --no-color --complete --active $OMIT_OUT $OMIT_IN --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" --filter "INBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" \
   | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
- echo "Found ${#therest_arr[@]} peers to be use in targetted rebalance with liquidity > 1.69*$MINIMUM_LIQUIDITY on both ends"
+ echo "Found ${#therest_arr[@]} peers to be use in targetted rebalance with liquidity > $MINIMUM_LIQUIDITY on both ends"
 
  if [ $IDLE_DAYS > 0 ]
  then
   #Get idle peers with high outbout to send to remote. Both OMIT_OUT and OMIT_IN is used to prevent duplicates
-  idletoin_arr=(`$BOS peers --no-color --complete --active --idle-days $IDLE_DAYS --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT_OUT $OMIT_IN \
+  idletoin_arr=(`$BOS peers --no-color --complete --active --idle-days $IDLE_DAYS --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT_OUT $OMIT_IN \
   | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
   echo "Found ${#idletoin_arr[@]} idle peers to shake up to remote, do not use in --in"
@@ -308,7 +314,7 @@ function init()
   done
 
   # The rest of the idle peers would be bought in to local
-  idletoout_arr=(`$BOS peers --no-color --complete --active --idle-days $IDLE_DAYS --filter "OUTBOUND_LIQUIDITY<(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT_IN $OMIT_OUT \
+  idletoout_arr=(`$BOS peers --no-color --complete --active --idle-days $IDLE_DAYS --sort outbound_liquidity --filter "OUTBOUND_LIQUIDITY<(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT_IN $OMIT_OUT \
   | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
   echo "Found ${#idletoout_arr[@]} idle peers to shake up to local, do not use in --out"
@@ -754,16 +760,16 @@ function ab_for_in()
  LIMIT_FEE_RATE=$HIGH_LIMIT_FEE_RATE
  NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
- counter=0
- local send_zero;
+ local counter=0;
  local send;
 
  for OUT in "${forin_arr[@]}";
  do
-  send_zero=$TRUE; send=$TRUE; ((counter+=1)); echo ".... peer $counter of ${#forin_arr[@]}"
+  ((counter+=1)); echo ".... peer $counter of ${#forin_arr[@]}"
   #While is exit at the end
   while true
   do
+   send=$TRUE;
    if [ ${#zerofeetoout_arr[@]} -gt 0 ]
    then
     #prioritise zero fee peers
@@ -778,10 +784,21 @@ function ab_for_in()
           init || break 2;
         }
       } || echo "... rebalance failed";
-     } || { echo "... send failed"; send_zero=$FALSE; }
+     } || { echo "... send failed"; send=$FALSE; }
 
     date; sleep 1;
    fi
+   if [[ $SNIPER = $TRUE && $send = $TRUE ]]
+   then
+    echo ".... Sniper Activated - retry"
+   else
+    break;
+   fi
+  done
+
+  while true
+  do
+   send=$TRUE;
    # Now try with other peers.
    j=$(($RANDOM % ${#t_bringtoout_arr[@]}));
    #Select A random in peer
@@ -799,7 +816,7 @@ function ab_for_in()
 
    date; sleep 1;
    #Exit from While True
-   if [[ $SNIPER = $TRUE && ( $send_zero = $TRUE || $send = $TRUE ) ]]
+   if [[ $SNIPER = $TRUE && $send = $TRUE ]]
    then
     echo ".... Sniper Activated - retry"
    else
@@ -882,7 +899,7 @@ function process_loop()
  then
 
   #Add the rest array to increase chances.
-  local t_sendtoin_arr=(${sendtoin_arr[@]}); t_sendtoin_arr+=(${therest_arr[@]});
+  local t_sendtoin_arr=(${sendtoin_arr[@]}); t_sendtoin_arr+=(${therest_arr[@]}); t_sendtoin_arr+=(${twoway_arr[@]}); t_sendtoin_arr+=(${bringtoout_arr[@]});
   echo "Step $step:$step_txt ... Reduce Remote for --in LOOP via ${#t_sendtoin_arr[@]} --out peers"
 
   MAX_FEE_RATE=$LOOP_MAX_FEE_RATE
@@ -896,10 +913,9 @@ function process_loop()
    ((counter+=1)); echo ".... peer $counter of ${#t_sendtoin_arr[@]}"
 
    IN=$LOOP
-   # Loop does not accept keysend once it does change ; to &&
-   send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt;
+   send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
     { rebalance $OUT $IN "--in-target-outbound CAPACITY" &&
-      { check_peer_capacity $IN "INBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" ||
+      { check_peer_capacity $IN "INBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" ||
         { echo "... Peer $IN completed ... break ...";
           break;
         }
@@ -933,10 +949,11 @@ function tip()
 
 function final_sleep()
 {
- echo "Final Sleep for 3600 seconds you can press ctrl-c"
+ sleep_time=7200
+ echo "Final Sleep for $sleep_time seconds you can press ctrl-c"
  date;
  echo "========= SLEEP ========"
- sleep 3600
+ sleep $sleep_time
 }
 
 # Start of Script
@@ -946,8 +963,10 @@ random_reconnect
 step_count=0
 #For each step, execute init followed by step
 
-for run_func in "process_loop" "process_chivo" "ab_for_in" "ab_for_out" "ab_for_2w" "sendtoin_high_local" "ensure_minimum_local" "idle_to_in" "idle_to_out"
-#for run_func in "ab_for_2w"
+#for run_func in "process_loop" "ab_for_in" "ab_for_out" "ab_for_2w" "sendtoin_high_local" "ensure_minimum_local" "idle_to_in" "idle_to_out"
+#for run_func in "process_loop" "process_chivo" "ab_for_in" "ab_for_out" "ab_for_2w" "sendtoin_high_local" "ensure_minimum_local" "idle_to_in" "idle_to_out"
+#for run_func in "process_loop"
+for run_func in "process_loop" "ab_for_in" "ab_for_out" "ab_for_2w" "sendtoin_high_local" "idle_to_in"
 do
  echo "Initialising step ... $step_count : $run_func"
  if init
