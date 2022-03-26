@@ -120,4 +120,6 @@ Change History:
 #0.2.3 - Place for two way channels
        - Sniper Mode (keep hitting until capacity reached)
 #0.2.4 - Minimimm Liquidity related minor adjustments.
+#0.2.5 - Randomise Loop Rebalance
+       - Using AVOID for send.
 ```

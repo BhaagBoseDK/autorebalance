@@ -55,8 +55,9 @@
 # 0.2.3 - Place for two way channels
 #       - Sniper Mode (keep hitting until capacity reached)
 # 0.2.4 - Minimimm Liquidity related minor adjustments.
-#       - <>
-script_ver=0.2.4
+# 0.2.5 - Randomise Loop Rebalance
+#       - Using AVOID for send.
+script_ver=0.2.5
 ##       - <to design> use avoid to rebalance key channels
 #
 # ------------------------------------------------------------------------------------------------
@@ -82,8 +83,8 @@ MAX_FEE=500000
 #This is the maximum fee used in for targeted rebalances (what earns you most fees).
 #Fee variables can be defined in environment so you do not have to change the values after each git pull.
 #BaseFee is highest rebalance rate used as 70% of your earning ppm.
-
-BASE_FEE=$((2069*65/100))
+BASE_ROUTING_FEE=969
+BASE_FEE=$((BASE_ROUTING_FEE*90/100))
 
 HIGH_MAX_FEE_RATE=${HIGH_MAX_FEE_RATE:-$BASE_FEE}
 HIGH_LIMIT_FEE_RATE=${HIGH_LIMIT_FEE_RATE:-$HIGH_MAX_FEE_RATE}
@@ -174,7 +175,7 @@ fi
 
 echo "========= START UP ==========="
 echo "==== version $script_ver ===="
-echo ".. Working with $BASE_FEE base fee rates applying max $LOW_MAX_FEE_RATE:$LOW_LIMIT_FEE_RATE, $HIGH_MAX_FEE_RATE:$HIGH_LIMIT_FEE_RATE, $LOOP_MAX_FEE_RATE:$LOOP_LIMIT_FEE_RATE"
+echo ".. Working with $BASE_ROUTING_FEE base fee rates applying max $LOW_MAX_FEE_RATE:$LOW_LIMIT_FEE_RATE, $HIGH_MAX_FEE_RATE:$HIGH_LIMIT_FEE_RATE, $LOOP_MAX_FEE_RATE:$LOOP_LIMIT_FEE_RATE"
 date
 
 bos_ver=`$BOS -V`
@@ -273,10 +274,10 @@ function init()
 
  if [ "$TAG_FOR_2W" != " " ]
  then
-  twoway_arr=(`$BOS peers --no-color --complete $TAG_FOR_2W --sort outbound_liquidity --filter "INBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY"\
+  twoway_arr=(`$BOS peers --no-color --complete $TAG_FOR_2W --sort outbound_liquidity --filter "INBOUND_LIQUIDITY>(INBOUND_LIQUIDITY+OUTBOUND_LIQUIDITY)*$TWO_WAY_TARGET*2/3"\
   | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print " --omit "$2}'`)
   #divide by 2 beause --omit is added
-  echo "Found $((${#twoway_arr[@]}/2)) special peers to keep balanced 2-way with inbound > 1.69*$MINIMUM_LIQUIDITY, do not use in --out"
+  echo "Found $((${#twoway_arr[@]}/2)) special peers to keep balanced 2-way with inbound > CAPACITY * $TWO_WAY_TARGET*2/3, do not use in --out"
 
   OMIT_OUT+=" "${twoway_arr[@]}
 
@@ -290,15 +291,15 @@ function init()
  $DEBUG $OMIT_OUT $OMIN_IN
  # Get zero fee peers towards our node
  zerofeetoout_arr=(`$BOS peers --no-color --complete --sort outbound_liquidity --active $OMIT_IN --filter "INBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" \
-  | grep -e "inbound_fee_rate:" -e "public_key:" | grep -v "partner_public_key:" | grep "(0)" -A1  | grep "public_key:" | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
+  | grep -e "inbound_fee_rate:" -e "public_key:" | grep -v "partner_public_key:" | grep "([0-9])" -A1  | grep "public_key:" | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
  echo "Found ${#zerofeetoout_arr[@]} zero in fee peers for rebalance to local with inbound > $MINIMUM_LIQUIDITY, for use in --in"
 
  # Get peers which are neither in nor out
- therest_arr=(`$BOS peers --no-color --complete --active $OMIT_OUT $OMIT_IN --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" --filter "INBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" \
+ therest_arr=(`$BOS peers --no-color --complete --active $OMIT_OUT $OMIT_IN --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" --filter "INBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" \
   | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
- echo "Found ${#therest_arr[@]} peers to be use in targetted rebalance with liquidity > $MINIMUM_LIQUIDITY on both ends"
+ echo "Found ${#therest_arr[@]} peers to be use in targetted rebalance with liquidity > 1.69*$MINIMUM_LIQUIDITY on both ends"
 
  if [ $IDLE_DAYS > 0 ]
  then
@@ -423,9 +424,9 @@ function send_to_peer()
   return $FALSE
  fi
 
- echo  -e "\n ... $BOS send $MY_KEY --amount $SEND_AMOUNT --max-fee $MAX_FEE_SEND --out $OUT --in $IN $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE"
+ echo  -e "\n ... $BOS send $MY_KEY --amount $SEND_AMOUNT --avoid FEE_RATE>$LIMIT_FEE_RATE/$IN --avoid $OUT/FEE_RATE>$LIMIT_FEE_RATE --max-fee $MAX_FEE_SEND --out $OUT --in $IN $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE"
 
- $BOS send $MY_KEY --amount $SEND_AMOUNT --max-fee $MAX_FEE_SEND --out $OUT --in $IN $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE
+ $BOS send $MY_KEY --amount $SEND_AMOUNT --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee $MAX_FEE_SEND --out $OUT --in $IN $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE
 }
 
 function rebalance()
@@ -907,11 +908,14 @@ function process_loop()
   NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
   counter=0
-  for OUT in "${t_sendtoin_arr[@]}"
+  # Select random peers
+  local random_peers=($(shuf -i 0-$((${#t_sendtoin_arr[@]}-1))));
+
+  for i in "${random_peers[@]}"
   do
 
-   ((counter+=1)); echo ".... peer $counter of ${#t_sendtoin_arr[@]}"
-
+   ((counter+=1)); echo ".... $counter of ${#t_sendtoin_arr[@]} random peer $i"
+   OUT=${t_sendtoin_arr[i]}
    IN=$LOOP
    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
     { rebalance $OUT $IN "--in-target-outbound CAPACITY" &&
@@ -949,7 +953,7 @@ function tip()
 
 function final_sleep()
 {
- sleep_time=7200
+ sleep_time=6921
  echo "Final Sleep for $sleep_time seconds you can press ctrl-c"
  date;
  echo "========= SLEEP ========"
