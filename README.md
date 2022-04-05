@@ -4,10 +4,11 @@ This script can be run continuously to attempt to create a balanced node or one 
 
 # Algo:
 
-Special bos tags ab_for_out/ab_for_in are used. Tag names can be configured in the script.
+Special bos tags ab_for_out/ab_for_in/ab_for_2w are used. Tag names can be configured in the script.
 
 ab_for_out tag contains all peers which you want to mostly keep local (i.e. they flow out to generate routing or your)
 ab_for_in tag contains all peers which you want to mostly keep remote (i.e. they flow in through your node and generate routing for your).
+ab_for_2w contains peers which you want to keep 2 way balanced with local balance priority. They flow both ways. Make sure you select the peer carefully otherwise they can end up with stuck local.
 
 in the script you can define multiple tags for in or out using --tag tagname --tag tagname syntax.
 
@@ -122,4 +123,10 @@ Change History:
 #0.2.4 - Minimimm Liquidity related minor adjustments.
 #0.2.5 - Randomise Loop Rebalance
        - Using AVOID for send.
+#0.2.6 - Changes related to leaving Minimum Liquidity on Channels.
+       - make zero fee peers available for out rebalance too.
+       - only rebalance 2w which have routed in last active_days
+       - Append to peers file
+       - Only rebalance if there was a recent forward.
+       - Dynamic Rebalance Fee based on OUT channel.
 ```

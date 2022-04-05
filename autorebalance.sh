@@ -57,7 +57,13 @@
 # 0.2.4 - Minimimm Liquidity related minor adjustments.
 # 0.2.5 - Randomise Loop Rebalance
 #       - Using AVOID for send.
-script_ver=0.2.5
+# 0.2.6 - Changes related to leaving Minimum Liquidity on Channels.
+#       - make zero fee peers available for out rebalance too.
+#       - only rebalance 2w which have routed in last active_days
+#       - Append to peers file
+#       - Only rebalance if there was a recent forward.
+#       - Dynamic Rebalance Fee based on OUT channel.
+script_ver=0.2.6
 ##       - <to design> use avoid to rebalance key channels
 #
 # ------------------------------------------------------------------------------------------------
@@ -82,9 +88,8 @@ MAX_FEE=500000
 
 #This is the maximum fee used in for targeted rebalances (what earns you most fees).
 #Fee variables can be defined in environment so you do not have to change the values after each git pull.
-#BaseFee is highest rebalance rate used as 70% of your earning ppm.
-BASE_ROUTING_FEE=969
-BASE_FEE=$((BASE_ROUTING_FEE*90/100))
+BASE_ROUTING_FEE=1569
+BASE_FEE=$BASE_ROUTING_FEE
 
 HIGH_MAX_FEE_RATE=${HIGH_MAX_FEE_RATE:-$BASE_FEE}
 HIGH_LIMIT_FEE_RATE=${HIGH_LIMIT_FEE_RATE:-$HIGH_MAX_FEE_RATE}
@@ -138,6 +143,19 @@ CHIVO="02f72978d40efeffca537139ad6ac9f09970c000a2dbc0d7aa55a71327c4577a80"
 
 #Idle Days for nudge
 IDLE_DAYS=14
+ACTIVE_DAYS=30
+FEE_DAYS=7
+A_FEE_LIMIT=$((FEE_DAYS*10000))
+B_FEE_LIMIT=$((A_FEE_LIMIT/2))
+C_FEE_LIMIT=$((B_FEE_LIMIT/2))
+D_FEE_LIMIT=$((C_FEE_LIMIT/2))
+X_FEE_LIMIT=$((D_FEE_LIMIT/2))
+X_FEE=$BASE_FEE
+D_FEE=$((BASE_FEE+200))
+C_FEE=$((BASE_FEE+400))
+B_FEE=$((BASE_FEE+600))
+A_FEE=$((BASE_FEE+800))
+
 NUDGE_AMOUNT=69420
 NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
@@ -176,6 +194,13 @@ fi
 echo "========= START UP ==========="
 echo "==== version $script_ver ===="
 echo ".. Working with $BASE_ROUTING_FEE base fee rates applying max $LOW_MAX_FEE_RATE:$LOW_LIMIT_FEE_RATE, $HIGH_MAX_FEE_RATE:$HIGH_LIMIT_FEE_RATE, $LOOP_MAX_FEE_RATE:$LOOP_LIMIT_FEE_RATE"
+echo ".. Fee limits .."
+echo "... A $A_FEE_LIMIT $A_FEE"
+echo "... B $B_FEE_LIMIT $B_FEE"
+echo "... C $C_FEE_LIMIT $C_FEE"
+echo "... D $D_FEE_LIMIT $D_FEE"
+echo "... X $X_FEE_LIMIT $X_FEE"
+
 date
 
 bos_ver=`$BOS -V`
@@ -226,10 +251,9 @@ function init()
  #Get current peers
  if [ -d ~/utils ]
  then
-  cp ~/utils/peers $MY_T_DIR/
- else
-  $BOS peers > $MY_T_DIR/peers 2>&1
+  tail -1500 ~/utils/peers > $MY_T_DIR/peers
  fi
+ $BOS peers >> $MY_T_DIR/peers 2>&1
 
  OMIT_OUT=$gOMIT_OUT
  OMIT_IN=$gOMIT_IN
@@ -244,10 +268,10 @@ function init()
   OMIT_OUT+=${forout_arr[@]}
 
   # Now get peers for out with available inbound.
-  forout_arr=(`$BOS peers --no-color --complete --sort outbound_liquidity --active --filter "INBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" $TAG_FOR_OUT \
+  forout_arr=(`$BOS peers --no-color --complete --sort outbound_liquidity --active --filter "INBOUND_LIQUIDITY>OUTBOUND_LIQUIDITY*1569/10000" $TAG_FOR_OUT \
   | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
-  echo "... of which found ${#forout_arr[@]} special peers to keep local with inbound > 1.69*$MINIMUM_LIQUIDITY, do not use in --out"
+  echo "... of which found ${#forout_arr[@]} special peers to keep local with inbound > outbound * 15.69%, do not use in --out"
  fi
 
  #$DEBUG $OMIT_OUT
@@ -262,10 +286,10 @@ function init()
   OMIT_IN+=${forin_arr[@]}
 
   # Now get peers for in with available outbound.
-  forin_arr=(`$BOS peers --no-color --complete --sort inbound_liquidity --active --filter "OUTBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" $TAG_FOR_IN \
+  forin_arr=(`$BOS peers --no-color --complete --sort inbound_liquidity --active --filter "OUTBOUND_LIQUIDITY>INBOUND_LIQUIDITY*2169/10000" $TAG_FOR_IN \
   | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
-  echo "... of which found ${#forin_arr[@]} special peers to keep remote with outbound > 1.69*$MINIMUM_LIQUIDITY, do not use in --in"
+  echo "... of which found ${#forin_arr[@]} special peers to keep remote with outbound > inbound * 21.69%, do not use in --in"
  fi
  #$DEBUG $OMIT_IN
 
@@ -274,37 +298,42 @@ function init()
 
  if [ "$TAG_FOR_2W" != " " ]
  then
-  twoway_arr=(`$BOS peers --no-color --complete $TAG_FOR_2W --sort outbound_liquidity --filter "INBOUND_LIQUIDITY>(INBOUND_LIQUIDITY+OUTBOUND_LIQUIDITY)*$TWO_WAY_TARGET*2/3"\
+  twoway_arr=(`$BOS peers --no-color --complete $TAG_FOR_2W --sort outbound_liquidity --filter "INBOUND_LIQUIDITY>(INBOUND_LIQUIDITY + OUTBOUND_LIQUIDITY)*$TWO_WAY_TARGET"\
   | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print " --omit "$2}'`)
   #divide by 2 beause --omit is added
-  echo "Found $((${#twoway_arr[@]}/2)) special peers to keep balanced 2-way with inbound > CAPACITY * $TWO_WAY_TARGET*2/3, do not use in --out"
+  echo "Found $((${#twoway_arr[@]}/2)) special peers to keep balanced 2-way with inbound > capacity * $TWO_WAY_TARGET, do not use in --out"
 
   OMIT_OUT+=" "${twoway_arr[@]}
 
-  # Now get peers for out with available inbound.
-  twoway_arr=(`$BOS peers --no-color --complete --sort outbound_liquidity --active --filter "INBOUND_LIQUIDITY>1.21*(INBOUND_LIQUIDITY+OUTBOUND_LIQUIDITY)*$TWO_WAY_TARGET" $TAG_FOR_2W \
-  | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
+  # Now get fee earnings peers for out with available inbound.
+  twoway_arr=(`$BOS peers --fee-days $ACTIVE_DAYS --no-color --complete --sort outbound_liquidity --active --filter "INBOUND_LIQUIDITY>OUTBOUND_LIQUIDITY*10000/2169" $TAG_FOR_2W \
+  | grep -v partner_ | grep -e "fee_earnings:" -e "public_key" | grep "fee_earnings:" -A1 | grep public_key: | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
-  echo "... of which found ${#twoway_arr[@]} 2-way balance special peers to bring to local with inbound > 1.21*CAPACITY*$TWO_WAY_TARGET"
+  echo "... of which found ${#twoway_arr[@]} 2-way balance special peers active in $ACTIVE_DAYS days to bring to local with inbound > outbound/21.69%"
  fi
 
  $DEBUG $OMIT_OUT $OMIN_IN
- # Get zero fee peers towards our node
- zerofeetoout_arr=(`$BOS peers --no-color --complete --sort outbound_liquidity --active $OMIT_IN --filter "INBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" \
+ # Get zero fee peers towards our node based on liquidity divide them in for OUT or IN
+ zerofeetoout_arr=(`$BOS peers --no-color --complete --sort outbound_liquidity --active $OMIT_IN --filter "INBOUND_LIQUIDITY>(INBOUND_LIQUIDITY + OUTBOUND_LIQUIDITY)*6942/10000" \
   | grep -e "inbound_fee_rate:" -e "public_key:" | grep -v "partner_public_key:" | grep "([0-9])" -A1  | grep "public_key:" | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
- echo "Found ${#zerofeetoout_arr[@]} zero in fee peers for rebalance to local with inbound > $MINIMUM_LIQUIDITY, for use in --in"
+ echo "Found ${#zerofeetoout_arr[@]} zero in fee peers for rebalance to local with inbound > capacity * 69.42%, for use in --in"
+
+ zerofeetoin_arr=(`$BOS peers --no-color --complete --sort inbound_liquidity --active $OMIT_OUT --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY + INBOUND_LIQUIDITY)*6942/10000" \
+  | grep -e "inbound_fee_rate:" -e "public_key:" | grep -v "partner_public_key:" | grep "([0-9])" -A1  | grep "public_key:" | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
+
+ echo "Found ${#zerofeetoin_arr[@]} zero in fee peers for rebalance to remote with outbound > capacity * 69.42%, for use in --out"
 
  # Get peers which are neither in nor out
- therest_arr=(`$BOS peers --no-color --complete --active $OMIT_OUT $OMIT_IN --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" --filter "INBOUND_LIQUIDITY>1.69*$MINIMUM_LIQUIDITY" \
+ therest_arr=(`$BOS peers --no-color --complete --active $OMIT_OUT $OMIT_IN --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(INBOUND_LIQUIDITY + OUTBOUND_LIQUIDITY) * 2169/10000" --filter "INBOUND_LIQUIDITY>(INBOUND_LIQUIDITY + OUTBOUND_LIQUIDITY) * 2169/10000" \
   | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
- echo "Found ${#therest_arr[@]} peers to be use in targetted rebalance with liquidity > 1.69*$MINIMUM_LIQUIDITY on both ends"
+ echo "Found ${#therest_arr[@]} peers to be use in targetted rebalance with liquidity > 21.69% * capacity on both ends"
 
  if [ $IDLE_DAYS > 0 ]
  then
   #Get idle peers with high outbout to send to remote. Both OMIT_OUT and OMIT_IN is used to prevent duplicates
-  idletoin_arr=(`$BOS peers --no-color --complete --active --idle-days $IDLE_DAYS --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT_OUT $OMIT_IN \
+  idletoin_arr=(`$BOS peers --no-color --complete --active --idle-days $IDLE_DAYS --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT_OUT \
   | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
   echo "Found ${#idletoin_arr[@]} idle peers to shake up to remote, do not use in --in"
@@ -315,7 +344,7 @@ function init()
   done
 
   # The rest of the idle peers would be bought in to local
-  idletoout_arr=(`$BOS peers --no-color --complete --active --idle-days $IDLE_DAYS --sort outbound_liquidity --filter "OUTBOUND_LIQUIDITY<(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT_IN $OMIT_OUT \
+  idletoout_arr=(`$BOS peers --no-color --complete --active --idle-days $IDLE_DAYS --sort outbound_liquidity --filter "OUTBOUND_LIQUIDITY<(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT_IN \
   | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
   echo "Found ${#idletoout_arr[@]} idle peers to shake up to local, do not use in --out"
@@ -328,7 +357,7 @@ function init()
 
  #Get peers with high outbound to send to remote
 
- local tmp_sendtoin_arr=(`$BOS peers --no-color --complete --active --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT_OUT $OMIT_IN \
+ local tmp_sendtoin_arr=(`$BOS peers --no-color --complete --active --sort inbound_liquidity --filter "OUTBOUND_LIQUIDITY>(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$OUT_OVER_CAPACITY" $OMIT_OUT  \
  | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
  echo "Found ${#tmp_sendtoin_arr[@]} with OUTBOUND > $OUT_OVER_CAPACITY to send to remote, do not use in --in"
@@ -341,7 +370,7 @@ function init()
  echo "Working with ${#sendtoin_arr[@]} peers to rebalance to remote ... final total, do not use in --in"
 
  #Get all low outbound channels 70% below minimum to increase local.
- local tmp_bringtoout_arr=(`$BOS peers --no-color --complete --active --sort outbound_liquidity --filter "OUTBOUND_LIQUIDITY<(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$IN_TARGET_OUTBOUND*7/10" $OMIT_IN $OMIT_OUT \
+ local tmp_bringtoout_arr=(`$BOS peers --no-color --complete --active --sort outbound_liquidity --filter "OUTBOUND_LIQUIDITY<(OUTBOUND_LIQUIDITY+INBOUND_LIQUIDITY)*$IN_TARGET_OUTBOUND*7/10" $OMIT_IN \
  | grep public_key: | grep -v partner_ | awk -F : '{gsub(/^[ \t]+/, "", $2);print $2}'`)
 
  echo "Found ${#tmp_bringtoout_arr[@]} with OUTBOUND < $IN_TARGET_OUTBOUND to bring to local, do not use in --out"
@@ -367,6 +396,7 @@ function init()
  echo "$OMIT_OUT" | sed 's/ 0/\n0/g' > $MY_T_DIR/omitout.$step_count
  echo "$OMIT_IN" | sed 's/ 0/\n0/g' > $MY_T_DIR/omitin.$step_count
  echo "${zerofeetoout_arr[@]}" | sed 's/ 0/\n0/g' > $MY_T_DIR/zerofeetoout.$step_count
+ echo "${zerofeetoin_arr[@]}" | sed 's/ 0/\n0/g' > $MY_T_DIR/zerofeetoin.$step_count
 
  if [ ${#sendtoin_arr[@]} -eq 0 ]
  then
@@ -380,6 +410,126 @@ function init()
   return $FALSE
  fi
  return $TRUE
+}
+
+#Function to populate validation file for only fee earning peers to be used in rebalance
+function create_fee_db()
+{
+ date; echo ".. Creating Forward Fee Validation DB for forwards in $FEE_DAYS days";
+
+ $BOS forwards --days $FEE_DAYS --sort earned_total | sed 's/^/ /g' | grep 0 | rev > $MY_T_DIR/fee.db.tmp
+
+ unset AllowForOut_arr; unset AllowForIn_arr; unset AFee_arr; unset BFee_arr; unset CFee_arr; unset DFee_arr; unset XFee_arr;
+
+ while IFS="│" read -r tmp peer liq_out liq_in t_out_fee t_in_fee alias
+ do
+  group="I"
+  fee_group="A"
+  peer=`echo $peer | rev`;
+  out_fee=`echo $t_out_fee | rev | cut -c 3-10`; out_fee=$((10#$out_fee));
+  in_fee=`echo $t_in_fee | rev | cut -c 3-10`; in_fee=$((10#$in_fee));
+
+  [[ $out_fee -lt $in_fee ]] && group="O";
+  [[ $out_fee -lt $B_FEE_LIMIT ]] && fee_group="B";
+  [[ $out_fee -lt $C_FEE_LIMIT ]] && fee_group="C";
+  [[ $out_fee -lt $D_FEE_LIMIT ]] && fee_group="D";
+  [[ $out_fee -lt $X_FEE_LIMIT ]] && fee_group="X";
+
+  case $group in
+   "O")
+    AllowForOut+=($peer)
+    ;;
+   "I")
+    AllowForIn+=($peer)
+    ;;
+   *)
+    echo "...Invalid peer, $group $peer, skipping ..."
+    ;;
+  esac
+
+  case $fee_group in
+   "A")
+    AFee_arr+=($peer)
+    ;;
+   "B")
+    BFee_arr+=($peer)
+    ;;
+   "C")
+    CFee_arr+=($peer)
+    ;;
+   "D")
+    DFee_arr+=($peer)
+    ;;
+   "X")
+    XFee_arr+=($peer)
+    ;;
+   *)
+    echo "...Invalid peer, $fee_group $peer, skipping ..."
+    ;;
+  esac
+  printf '%-1s %-1s %-66s %-10s %-10s %-10s %-10s %s\n' $group $fee_group $peer "`echo $liq_out | rev`" "`echo $liq_in | rev`" "`echo $t_out_fee | rev`" "`echo $t_in_fee | rev`" "`echo $alias | rev`" | tee -a $MY_T_DIR/fee.db
+ done < $MY_T_DIR/fee.db.tmp
+
+ echo "${AFee_arr[@]}" | sed 's/ 0/\n0/g' > $MY_T_DIR/AFee_arr.$step_count
+ echo "${BFee_arr[@]}" | sed 's/ 0/\n0/g' > $MY_T_DIR/BFee_arr.$step_count
+ echo "${CFee_arr[@]}" | sed 's/ 0/\n0/g' > $MY_T_DIR/CFee_arr.$step_count
+ echo "${DFee_arr[@]}" | sed 's/ 0/\n0/g' > $MY_T_DIR/DFee_arr.$step_count
+ echo "${XFee_arr[@]}" | sed 's/ 0/\n0/g' > $MY_T_DIR/XFee_arr.$step_count
+
+ $DEBUG "AllowForOut " ${AllowForOut[@]}
+ $DEBUG "AllowForIn "  ${AllowForIn[@]}
+ rm $MY_T_DIR/fee.db.tmp
+}
+
+#Check if the peer is allowed for the direction provided
+function check_allow_rebalance()
+{
+
+ direction=$1
+ peer=$2
+
+ echo -e "\n ... Validating $peer for $direction ------> \n";  grep $peer $MY_T_DIR/fee.db; grep $peer $MY_T_DIR/peers | tail -1;
+
+ [[ "$direction" == "OUT" && " ${AllowForOut[*]} " =~ " $peer " ]] && return $TRUE || \
+ [[ "$direction" == "IN" && " ${AllowForIn[*]} " =~ " $peer " ]] && return $TRUE || \
+ {
+  # Allow once in a 69
+  j=$((RANDOM % 69))
+  if [ $j = 0 ]
+  then
+   date; echo "... Random Allow"; return $TRUE;
+  else
+   echo " ... Not Allowed"; return $FALSE;
+  fi
+ }
+}
+#Return Max Fees to be used for OUT peer rebalance
+function get_fee()
+{
+ # local -n FEE=$1
+ peer=$1
+ grep $peer $MY_T_DIR/fee.db || echo ".... Non Earning Peer, using default fees .. $peer";
+
+ if [[ ${AFee_arr[*]} =~ $peer ]]
+ then
+  MAX_FEE_RATE=$A_FEE;
+ elif [[ ${BFee_arr[*]} =~ $peer ]]
+ then
+  MAX_FEE_RATE=$B_FEE;
+ elif [[ ${CFee_arr[*]} =~ $peer ]]
+ then
+  MAX_FEE_RATE=$C_FEE;
+ elif [[ ${DFee_arr[*]} =~ $peer ]]
+ then
+  MAX_FEE_RATE=$D_FEE;
+ elif [[ ${XFee_arr[*]} =~ $peer ]]
+ then
+  MAX_FEE_RATE=$X_FEE;
+ else
+  MAX_FEE_RATE=$((X_FEE*69/100));
+ fi
+
+ $DEBUG "...Calculated Fee $FEE"
 }
 
 #Return true if peer capacity matches the filter else false.
@@ -489,6 +639,9 @@ function idle_to_out()
  for IN in "${idletoout_arr[@]}";
  do
   ((counter+=1)); echo ".... peer $counter of ${#idletoout_arr[@]}"
+
+  check_allow_rebalance "IN" $IN || continue;
+
   j=$(($RANDOM % ${#sendtoin_arr[@]}));
   #Select A random out peer
   OUT=${sendtoin_arr[j]};
@@ -525,6 +678,9 @@ function idle_to_in()
  for OUT in "${idletoin_arr[@]}";
  do
   ((counter+=1)); echo ".... peer $counter of ${#idletoin_arr[@]}"
+
+  check_allow_rebalance "OUT" $OUT || continue;
+
   if [ ${#zerofeetoout_arr[@]} -gt 0 ]
   then
    #prioritise zero fee peers
@@ -581,6 +737,9 @@ function ensure_minimum_local()
  for IN in "${bringtoout_arr[@]}";
  do
   ((counter+=1)); echo ".... peer $counter of ${#bringtoout_arr[@]}"
+
+  check_allow_rebalance "IN" $IN || continue;
+
   j=$(($RANDOM % ${#sendtoin_arr[@]}));
   #Select A random out peer
   OUT=${sendtoin_arr[j]};
@@ -614,6 +773,9 @@ function sendtoin_high_local()
  for OUT in "${sendtoin_arr[@]}";
  do
   ((counter+=1)); echo ".... peer $counter of ${#sendtoin_arr[@]}"
+
+  check_allow_rebalance "OUT" $OUT || continue;
+
   if [ ${#zerofeetoout_arr[@]} -gt 0 ]
   then
    #prioritise zero fee peers
@@ -670,9 +832,47 @@ function ab_for_2w()
  local send
  for IN in "${twoway_arr[@]}";
  do
-  send=$TRUE;((counter+=1)); echo ".... peer $counter of ${#twoway_arr[@]}"
+  ((counter+=1)); echo ".... peer $counter of ${#twoway_arr[@]}"
+
+  check_allow_rebalance "IN" $IN || continue;
+
+  get_fee $IN
+  LIMIT_FEE_RATE=$MAX_FEE_RATE
+  NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
+  echo "... Fee for rebalance $MAX_FEE_RATE $NUDGE_FEE"
+
   while true
   do
+   send=$TRUE;
+   if [ ${#zerofeetoin_arr[@]} -gt 0 ]
+   then
+    #prioritise zero fee peers
+    j=$(($RANDOM % ${#zerofeetoin_arr[@]}));
+    # Prioritise zero fee first
+    OUT=${zerofeetoin_arr[j]};
+    #send a nudge and if success rebalance
+    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
+     { rebalance $OUT $IN "--in-target-outbound CAPACITY*$TWO_WAY_TARGET" &&
+      { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>INBOUND_LIQUIDITY*2169/10000" ||
+        { echo "... Peer $OUT depleted ... reinitialise ...";
+          init || break 2;
+        }
+      } || echo "... rebalance failed";
+     } || { echo "... send failed"; send=$FALSE; }
+
+    date; sleep 1;
+   fi
+   if [[ $SNIPER = $TRUE && $send = $TRUE ]]
+   then
+    echo ".... Sniper Activated - retry"
+   else
+    break;
+   fi
+  done
+
+  while true
+  do
+   send=$TRUE;
    j=$(($RANDOM % ${#t_sendtoin_arr[@]}));
    #Select A random out peer
    OUT=${t_sendtoin_arr[j]};
@@ -680,7 +880,7 @@ function ab_for_2w()
    #send a nudge
    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
     { rebalance $OUT $IN "--in-target-outbound CAPACITY*$TWO_WAY_TARGET" &&
-      { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" ||
+      { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>INBOUND_LIQUIDITY*2169/10000" ||
         { echo "... Peer $OUT depleted ... reinitialise ...";
           init || break 2;
         }
@@ -716,11 +916,50 @@ function ab_for_out()
 
  counter=0
  local send
- for IN in "${forout_arr[@]}"; 
+ for IN in "${forout_arr[@]}";
  do
-  send=$TRUE; ((counter+=1)); echo ".... peer $counter of ${#forout_arr[@]}"
+  ((counter+=1)); echo ".... peer $counter of ${#forout_arr[@]}"
+  #While is exit at the end
+
+  check_allow_rebalance "IN" $IN || continue;
+
+  get_fee $IN
+  LIMIT_FEE_RATE=$MAX_FEE_RATE
+  NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
+  echo "... Fee for rebalance $MAX_FEE_RATE $NUDGE_FEE"
+
   while true
   do
+   send=$TRUE;
+   if [ ${#zerofeetoin_arr[@]} -gt 0 ]
+   then
+    #prioritise zero fee peers
+    j=$(($RANDOM % ${#zerofeetoin_arr[@]}));
+    # Prioritise zero fee first
+    OUT=${zerofeetoin_arr[j]};
+    #send a nudge and if success rebalance
+    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
+     { rebalance $OUT $IN "--in-target-outbound CAPACITY" &&
+      { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>INBOUND_LIQUIDITY*2169/10000" ||
+        { echo "... Peer $OUT depleted ... reinitialise ...";
+          init || break 2;
+        }
+      } || echo "... rebalance failed";
+     } || { echo "... send failed"; send=$FALSE; }
+
+    date; sleep 1;
+   fi
+   if [[ $SNIPER = $TRUE && $send = $TRUE ]]
+   then
+    echo ".... Sniper Activated - retry"
+   else
+    break;
+   fi
+  done
+
+  while true
+  do
+   send=$TRUE;
    j=$(($RANDOM % ${#t_sendtoin_arr[@]}));
    #Select A random out peer
    OUT=${t_sendtoin_arr[j]};
@@ -728,7 +967,7 @@ function ab_for_out()
    #send a nudge
    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
     { rebalance $OUT $IN "--in-target-outbound CAPACITY" &&
-      { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" ||
+      { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>INBOUND_LIQUIDITY*2169/10000" ||
         { echo "... Peer $OUT depleted ... reinitialise ...";
           init || break 2;
         }
@@ -757,10 +996,6 @@ function ab_for_in()
  echo "Step $step:$step_txt ... Increasing remote for channels we prefer to keep remote"
  echo "Working with ${#forin_arr[@]} --out peers to increase inbound via ${#t_bringtoout_arr[@]} --in peers to decrease inbound"
 
- MAX_FEE_RATE=$HIGH_MAX_FEE_RATE
- LIMIT_FEE_RATE=$HIGH_LIMIT_FEE_RATE
- NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
-
  local counter=0;
  local send;
 
@@ -768,6 +1003,9 @@ function ab_for_in()
  do
   ((counter+=1)); echo ".... peer $counter of ${#forin_arr[@]}"
   #While is exit at the end
+
+  check_allow_rebalance "OUT" $OUT || continue;
+
   while true
   do
    send=$TRUE;
@@ -777,10 +1015,16 @@ function ab_for_in()
     j=$(($RANDOM % ${#zerofeetoout_arr[@]}));
     # Prioritise zero fee first
     IN=${zerofeetoout_arr[j]};
+
+    get_fee $IN
+    LIMIT_FEE_RATE=$MAX_FEE_RATE
+    NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
+    echo "... Fee for rebalance $MAX_FEE_RATE $NUDGE_FEE"
+
     #send a nudge and if success rebalance
     send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
      { rebalance $OUT $IN "--out-target-inbound CAPACITY" &&
-      { check_peer_capacity $IN "INBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" ||
+      { check_peer_capacity $IN "INBOUND_LIQUIDITY>OUTBOUND_LIQUIDITY*2169/10000" ||
         { echo "... Peer $IN depleted ... reinitialise ...";
           init || break 2;
         }
@@ -805,10 +1049,15 @@ function ab_for_in()
    #Select A random in peer
    IN=${t_bringtoout_arr[j]};
 
+   get_fee $IN
+   LIMIT_FEE_RATE=$MAX_FEE_RATE
+   NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
+   echo "... Fee for rebalance $MAX_FEE_RATE $NUDGE_FEE"
+
    #send a nudge
    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
     { rebalance $OUT $IN "--out-target-inbound CAPACITY" &&
-      { check_peer_capacity $IN "INBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" ||
+      { check_peer_capacity $IN "INBOUND_LIQUIDITY>OUTBOUND_LIQUIDITY*2169/10000" ||
         { echo "... Peer $IN depleted ... reinitialise ...";
           init || break 2;
         }
@@ -844,14 +1093,23 @@ function process_chivo()
 
   OUT=$CHIVO
   counter=0
+
+  check_allow_rebalance "OUT" $OUT || return;
+
   # Prioritise zero fee peers
   for IN in "${zerofeetoout_arr[@]}"
   do
    ((counter+=1)); echo ".... peer $counter of ${#zerofeetoout_arr[@]}"
+
+   get_fee $IN
+   LIMIT_FEE_RATE=$MAX_FEE_RATE
+   NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
+   echo "... Fee for rebalance $MAX_FEE_RATE $NUDGE_FEE"
+
    #send a nudge with target rebalance
    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
     { rebalance $OUT $IN "--out-target-inbound CAPACITY" &&
-      { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" ||
+      { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>$INBOUND_LIQUIDITY*2169/10000" ||
         { echo "... Peer $OUT completed ... break ...";
           break;
         }
@@ -873,10 +1131,14 @@ function process_chivo()
   do
    ((counter+=1)); echo ".... $counter of $((${#t_bringtoout_arr[@]}/4)) random peer $i of ${#t_bringtoout_arr[@]}"
    IN=${t_bringtoout_arr[i]}
+   get_fee $IN
+   LIMIT_FEE_RATE=$MAX_FEE_RATE
+   NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
+   echo "... Fee for rebalance $MAX_FEE_RATE $NUDGE_FEE"
    #send a nudge with target rebalance
    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
     { rebalance $OUT $IN "--out-target-inbound CAPACITY" &&
-      { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" ||
+      { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>INBOUND_LIQUIDITY*2169/10000" ||
         { echo "... Peer $OUT completed ... break ...";
           break;
         }
@@ -900,7 +1162,7 @@ function process_loop()
  then
 
   #Add the rest array to increase chances.
-  local t_sendtoin_arr=(${sendtoin_arr[@]}); t_sendtoin_arr+=(${therest_arr[@]}); t_sendtoin_arr+=(${twoway_arr[@]}); t_sendtoin_arr+=(${bringtoout_arr[@]});
+  local t_sendtoin_arr=(${sendtoin_arr[@]}); t_sendtoin_arr+=(${zerrofeetoin_arr[@]}); t_sendtoin_arr+=(${zerofeetoout_arr[@]}); t_sendtoin_arr+=(${therest_arr[@]}); t_sendtoin_arr+=(${twoway_arr[@]}); t_sendtoin_arr+=(${bringtoout_arr[@]});
   echo "Step $step:$step_txt ... Reduce Remote for --in LOOP via ${#t_sendtoin_arr[@]} --out peers"
 
   MAX_FEE_RATE=$LOOP_MAX_FEE_RATE
@@ -908,6 +1170,10 @@ function process_loop()
   NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
   counter=0
+  IN=$LOOP
+
+  check_allow_rebalance "IN" $IN || return;
+
   # Select random peers
   local random_peers=($(shuf -i 0-$((${#t_sendtoin_arr[@]}-1))));
 
@@ -916,10 +1182,9 @@ function process_loop()
 
    ((counter+=1)); echo ".... $counter of ${#t_sendtoin_arr[@]} random peer $i"
    OUT=${t_sendtoin_arr[i]}
-   IN=$LOOP
    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
     { rebalance $OUT $IN "--in-target-outbound CAPACITY" &&
-      { check_peer_capacity $IN "INBOUND_LIQUIDITY>$MINIMUM_LIQUIDITY" ||
+      { check_peer_capacity $IN "INBOUND_LIQUIDITY>OUTBOUND_LIQUIDITY*216/10000" ||
         { echo "... Peer $IN completed ... break ...";
           break;
         }
@@ -962,15 +1227,17 @@ function final_sleep()
 
 # Start of Script
 
-random_reconnect
+#Uncomment on tor nodes
+#random_reconnect
+
+create_fee_db;
 
 step_count=0
 #For each step, execute init followed by step
 
-#for run_func in "process_loop" "ab_for_in" "ab_for_out" "ab_for_2w" "sendtoin_high_local" "ensure_minimum_local" "idle_to_in" "idle_to_out"
+#all list
 #for run_func in "process_loop" "process_chivo" "ab_for_in" "ab_for_out" "ab_for_2w" "sendtoin_high_local" "ensure_minimum_local" "idle_to_in" "idle_to_out"
-#for run_func in "process_loop"
-for run_func in "process_loop" "ab_for_in" "ab_for_out" "ab_for_2w" "sendtoin_high_local" "idle_to_in"
+for run_func in "process_loop" "ab_for_in" "ab_for_out" "ab_for_2w"
 do
  echo "Initialising step ... $step_count : $run_func"
  if init
