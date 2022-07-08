@@ -63,7 +63,8 @@
 #       - Append to peers file
 #       - Only rebalance if there was a recent forward.
 #       - Dynamic Rebalance Fee based on OUT channel.
-script_ver=0.2.6
+# 0.2.7 - Minor Changes
+script_ver=0.2.7
 ##       - <to design> use avoid to rebalance key channels
 #
 # ------------------------------------------------------------------------------------------------
@@ -88,15 +89,15 @@ MAX_FEE=500000
 
 #This is the maximum fee used in for targeted rebalances (what earns you most fees).
 #Fee variables can be defined in environment so you do not have to change the values after each git pull.
-BASE_ROUTING_FEE=1569
-BASE_FEE=$BASE_ROUTING_FEE
+BASE_ROUTING_FEE=369
+BASE_FEE=$((BASE_ROUTING_FEE*69/100))
 
 HIGH_MAX_FEE_RATE=${HIGH_MAX_FEE_RATE:-$BASE_FEE}
 HIGH_LIMIT_FEE_RATE=${HIGH_LIMIT_FEE_RATE:-$HIGH_MAX_FEE_RATE}
 
-#The normal/opportunistic Rebalance is at 1/4 of High fees
-LOW_MAX_FEE_RATE=${LOW_MAX_FEE_RATE:-$((HIGH_MAX_FEE_RATE/4))}
-LOW_LIMIT_FEE_RATE=${LOW_LIMIT_FEE_RATE:-$((HIGH_LIMIT_FEE_RATE/4))}
+#The normal/opportunistic Rebalance is at 1/5 of High fees
+LOW_MAX_FEE_RATE=${LOW_MAX_FEE_RATE:-$((HIGH_MAX_FEE_RATE/5))}
+LOW_LIMIT_FEE_RATE=${LOW_LIMIT_FEE_RATE:-$((HIGH_LIMIT_FEE_RATE/5))}
 
 #Loop fees are used for LOOP rebalance
 LOOP_MAX_FEE_RATE=${LOOP_MAX_FEE_RATE:-2569}
@@ -144,8 +145,9 @@ CHIVO="02f72978d40efeffca537139ad6ac9f09970c000a2dbc0d7aa55a71327c4577a80"
 #Idle Days for nudge
 IDLE_DAYS=14
 ACTIVE_DAYS=30
-FEE_DAYS=7
-A_FEE_LIMIT=$((FEE_DAYS*10000))
+FEE_DAYS=14
+#Assuming good channel would route 5K per day
+A_FEE_LIMIT=$((FEE_DAYS*5000))
 B_FEE_LIMIT=$((A_FEE_LIMIT/2))
 C_FEE_LIMIT=$((B_FEE_LIMIT/2))
 D_FEE_LIMIT=$((C_FEE_LIMIT/2))
@@ -153,9 +155,8 @@ X_FEE_LIMIT=$((D_FEE_LIMIT/2))
 X_FEE=$BASE_FEE
 D_FEE=$((BASE_FEE+200))
 C_FEE=$((BASE_FEE+400))
-B_FEE=$((BASE_FEE+600))
-A_FEE=$((BASE_FEE+800))
-
+B_FEE=$((BASE_FEE+700))
+A_FEE=$((BASE_FEE+1000))
 NUDGE_AMOUNT=69420
 NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
@@ -190,7 +191,7 @@ then
 fi
 
 #BOS=user_specific_path for bos
-
+date;
 echo "========= START UP ==========="
 echo "==== version $script_ver ===="
 echo ".. Working with $BASE_ROUTING_FEE base fee rates applying max $LOW_MAX_FEE_RATE:$LOW_LIMIT_FEE_RATE, $HIGH_MAX_FEE_RATE:$HIGH_LIMIT_FEE_RATE, $LOOP_MAX_FEE_RATE:$LOOP_LIMIT_FEE_RATE"
@@ -251,9 +252,9 @@ function init()
  #Get current peers
  if [ -d ~/utils ]
  then
-  tail -1500 ~/utils/peers > $MY_T_DIR/peers
+  tail -2500 ~/utils/peers > $MY_T_DIR/peers
  fi
- $BOS peers >> $MY_T_DIR/peers 2>&1
+ $BOS peers --fee-days $FEE_DAYS >> $MY_T_DIR/peers 2>&1
 
  OMIT_OUT=$gOMIT_OUT
  OMIT_IN=$gOMIT_IN
@@ -488,7 +489,7 @@ function check_allow_rebalance()
  direction=$1
  peer=$2
 
- echo -e "\n ... Validating $peer for $direction ------> \n";  grep $peer $MY_T_DIR/fee.db; grep $peer $MY_T_DIR/peers | tail -1;
+ date; echo -e "\n ... Validating $peer for $direction ------> \n";  grep $peer $MY_T_DIR/fee.db; grep $peer $MY_T_DIR/peers | tail -1;
 
  [[ "$direction" == "OUT" && " ${AllowForOut[*]} " =~ " $peer " ]] && return $TRUE || \
  [[ "$direction" == "IN" && " ${AllowForIn[*]} " =~ " $peer " ]] && return $TRUE || \
@@ -497,7 +498,7 @@ function check_allow_rebalance()
   j=$((RANDOM % 69))
   if [ $j = 0 ]
   then
-   date; echo "... Random Allow"; return $TRUE;
+   echo "... Random Allow"; return $TRUE;
   else
    echo " ... Not Allowed"; return $FALSE;
   fi
@@ -507,6 +508,7 @@ function check_allow_rebalance()
 function get_fee()
 {
  # local -n FEE=$1
+ date;
  peer=$1
  grep $peer $MY_T_DIR/fee.db || echo ".... Non Earning Peer, using default fees .. $peer";
 
@@ -526,7 +528,7 @@ function get_fee()
  then
   MAX_FEE_RATE=$X_FEE;
  else
-  MAX_FEE_RATE=$((X_FEE*69/100));
+  MAX_FEE_RATE=$((X_FEE*420/1000));
  fi
 
  $DEBUG "...Calculated Fee $FEE"
@@ -537,7 +539,7 @@ function check_peer_capacity()
 {
  PEER=$1
  FILTER=$2
- echo "... validating $PEER for $FILTER"
+ date; echo "... validating $PEER for $FILTER"
 
  echo -e "\n $BOS peers --no-color --complete --active --filter $FILTER | grep $PEER"
 
@@ -574,7 +576,7 @@ function send_to_peer()
   return $FALSE
  fi
 
- echo  -e "\n ... $BOS send $MY_KEY --amount $SEND_AMOUNT --avoid FEE_RATE>$LIMIT_FEE_RATE/$IN --avoid $OUT/FEE_RATE>$LIMIT_FEE_RATE --max-fee $MAX_FEE_SEND --out $OUT --in $IN $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE"
+ date; echo  -e "\n ... $BOS send $MY_KEY --amount $SEND_AMOUNT --avoid FEE_RATE>$LIMIT_FEE_RATE/$IN --avoid $OUT/FEE_RATE>$LIMIT_FEE_RATE --max-fee $MAX_FEE_SEND --out $OUT --in $IN $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE"
 
  $BOS send $MY_KEY --amount $SEND_AMOUNT --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee $MAX_FEE_SEND --out $OUT --in $IN $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE
 }
@@ -594,7 +596,7 @@ function rebalance()
   return $FALSE
  fi
 
- echo -e "\n ... $BOS rebalance --in $IN --out $OUT $TARGET --avoid FEE_RATE>$LIMIT_FEE_RATE/$IN --avoid $OUT/FEE_RATE>$LIMIT_FEE_RATE --max-fee-rate $FEE_RATE --max-fee $FEE $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE"
+ date; echo -e "\n ... $BOS rebalance --in $IN --out $OUT $TARGET --avoid FEE_RATE>$LIMIT_FEE_RATE/$IN --avoid $OUT/FEE_RATE>$LIMIT_FEE_RATE --max-fee-rate $FEE_RATE --max-fee $FEE $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE"
 
  $BOS rebalance --in $IN --out $OUT $TARGET --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $FEE_RATE --max-fee $FEE $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE
 }
@@ -618,7 +620,7 @@ function random_nudge()
  #echo $j
  if [ $j = 6942 ]
  then
-  echo "... Random nudge $OUT No activity bewteen our channel for 30 days. Please review. Love from $MY_KEY"
+  date; echo "... Random nudge $OUT No activity bewteen our channel for 30 days. Please review. Love from $MY_KEY"
 
   $BOS send $IN --amount 1 --max-fee 1 --message "No activity bewteen our channel for $IDLE_DAYS days. Please review. Love from $MY_KEY"
  fi
@@ -628,14 +630,14 @@ function idle_to_out()
 {
  step=${1:-99}
  step_txt=${2:-X}
- echo "Step $step:$step_txt ... Nudging idle peers to CAPACITY/2"
+ date; echo "Step $step:$step_txt ... Nudging idle peers to CAPACITY/2"
  echo "Working with ${#idletoout_arr[@]} --in peers to increase outbound balance to CAPACITY/2 via ${#sendtoin_arr[@]} --out peers to decrease outbound"
 
  MAX_FEE_RATE=$LOW_MAX_FEE_RATE
  LIMIT_FEE_RATE=$LOW_LIMIT_FEE_RATE
  NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
- counter=0
+ local counter=0
  for IN in "${idletoout_arr[@]}";
  do
   ((counter+=1)); echo ".... peer $counter of ${#idletoout_arr[@]}"
@@ -667,14 +669,14 @@ function idle_to_in()
 {
  step=${1:-99}
  step_txt=${2:-X}
- echo "Step $step:$step_txt ... Nudging idle peers to CAPACITY/2"
+ date; echo "Step $step:$step_txt ... Nudging idle peers to CAPACITY/2"
  echo "Working with ${#idletoin_arr[@]} --out peers to increase remote balance to CAPACITY/2 via ${#bringtoout_arr[@]} --out peers to increase outbound"
 
  MAX_FEE_RATE=$LOW_MAX_FEE_RATE
  LIMIT_FEE_RATE=$LOW_LIMIT_FEE_RATE
  NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
- counter=0
+ local counter=0
  for OUT in "${idletoin_arr[@]}";
  do
   ((counter+=1)); echo ".... peer $counter of ${#idletoin_arr[@]}"
@@ -726,14 +728,14 @@ function ensure_minimum_local()
 {
  step=${1:-99}
  step_txt=${2:-X}
- echo "Step $step:$step_txt ... Ensure Local balance if channel local balance is < $IN_TARGET_OUTBOUND"
+ date; echo "Step $step:$step_txt ... Ensure Local balance if channel local balance is < $IN_TARGET_OUTBOUND"
  echo "Working with ${#bringtoout_arr[@]} --in peers to increase outbound via ${#sendtoin_arr[@]} --out peers to decrease outbound"
 
  MAX_FEE_RATE=$LOW_MAX_FEE_RATE
  LIMIT_FEE_RATE=$LOW_LIMIT_FEE_RATE
  NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
- counter=0
+ local counter=0
  for IN in "${bringtoout_arr[@]}";
  do
   ((counter+=1)); echo ".... peer $counter of ${#bringtoout_arr[@]}"
@@ -762,14 +764,14 @@ function sendtoin_high_local()
 {
  step=${1:-99}
  step_txt=${2:-X}
- echo "Step $step:$step_txt ... Reducing outbound for channels with outbound  > $OUT_OVER_CAPACITY to CAPACITY/2"
+ date; echo "Step $step:$step_txt ... Reducing outbound for channels with outbound  > $OUT_OVER_CAPACITY to CAPACITY/2"
  echo "Working with ${#sendtoin_arr[@]} --out peers to increase inbound via ${#bringtoout_arr[@]} --in peers to decrease inbound"
 
  MAX_FEE_RATE=$LOW_MAX_FEE_RATE
  LIMIT_FEE_RATE=$LOW_LIMIT_FEE_RATE
  NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
- counter=0
+ local counter=0
  for OUT in "${sendtoin_arr[@]}";
  do
   ((counter+=1)); echo ".... peer $counter of ${#sendtoin_arr[@]}"
@@ -821,14 +823,14 @@ function ab_for_2w()
  #Add the rest array to increase chances.
  local t_sendtoin_arr=(${sendtoin_arr[@]}); t_sendtoin_arr+=(${therest_arr[@]});
 
- echo "Step $step:$step_txt ... Increasing outbound for channels we prefer to keep two way"
+ date; echo "Step $step:$step_txt ... Increasing outbound for channels we prefer to keep two way"
  echo "Working with ${#twoway_arr[@]} --in peers to increase outbound for 2 way balance via ${#t_sendtoin_arr[@]} --out peers to decrease outbound"
 
  MAX_FEE_RATE=$HIGH_MAX_FEE_RATE
  LIMIT_FEE_RATE=$HIGH_LIMIT_FEE_RATE
  NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
- counter=0
+ local counter=0
  local send
  for IN in "${twoway_arr[@]}";
  do
@@ -857,16 +859,18 @@ function ab_for_2w()
         { echo "... Peer $OUT depleted ... reinitialise ...";
           init || break 2;
         }
-      } || echo "... rebalance failed";
+      } || { echo "... rebalance failed"; send=$FALSE; }
      } || { echo "... send failed"; send=$FALSE; }
 
     date; sleep 1;
-   fi
-   if [[ $SNIPER = $TRUE && $send = $TRUE ]]
-   then
-    echo ".... Sniper Activated - retry"
+    if [[ $SNIPER = $TRUE && $send = $TRUE ]]
+    then
+     date; echo ".... Sniper Activated - retry"; sleep 1;
+    else
+     break;
+    fi
    else
-    break;
+    date; echo ".... No available peers, move on"; break;
    fi
   done
 
@@ -891,7 +895,7 @@ function ab_for_2w()
    #Exit from While True
    if [[ $SNIPER = $TRUE && $send = $TRUE ]]
    then
-    echo ".... Sniper Activated - retry"
+    date; echo ".... Sniper Activated - retry"; sleep 1;
    else
     break;
    fi
@@ -907,14 +911,14 @@ function ab_for_out()
  #Add the rest array to increase chances.
  local t_sendtoin_arr=(${sendtoin_arr[@]}); t_sendtoin_arr+=(${therest_arr[@]});
 
- echo "Step $step:$step_txt ... Increasing outbound for channels we prefer to keep local"
+ date; echo "Step $step:$step_txt ... Increasing outbound for channels we prefer to keep local"
  echo "Working with ${#forout_arr[@]} --in peers to increase outbound via ${#t_sendtoin_arr[@]} --out peers to decrease outbound"
 
  MAX_FEE_RATE=$HIGH_MAX_FEE_RATE
  LIMIT_FEE_RATE=$HIGH_LIMIT_FEE_RATE
  NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
- counter=0
+ local counter=0
  local send
  for IN in "${forout_arr[@]}";
  do
@@ -944,16 +948,18 @@ function ab_for_out()
         { echo "... Peer $OUT depleted ... reinitialise ...";
           init || break 2;
         }
-      } || echo "... rebalance failed";
+      } || echo  "... rebalance failed";
      } || { echo "... send failed"; send=$FALSE; }
 
     date; sleep 1;
-   fi
-   if [[ $SNIPER = $TRUE && $send = $TRUE ]]
-   then
-    echo ".... Sniper Activated - retry"
+    if [[ $SNIPER = $TRUE && $send = $TRUE ]]
+    then
+     date; echo ".... Sniper Activated - retry"; sleep 1;
+    else
+     break;
+    fi
    else
-    break;
+    date; echo ".... No available peers, move on"; break;
    fi
   done
 
@@ -978,7 +984,7 @@ function ab_for_out()
    #Exit from While True
    if [[ $SNIPER = $TRUE && $send = $TRUE  ]]
    then
-    echo ".... Sniper Activated - retry"
+    date; echo ".... Sniper Activated - retry"; sleep 1;
    else
     break;
    fi
@@ -993,7 +999,7 @@ function ab_for_in()
  #Add the rest array to increase chances.
  local t_bringtoout_arr=(${bringtoout_arr[@]}); t_bringtoout_arr+=(${therest_arr[@]});
 
- echo "Step $step:$step_txt ... Increasing remote for channels we prefer to keep remote"
+ date; echo "Step $step:$step_txt ... Increasing remote for channels we prefer to keep remote"
  echo "Working with ${#forin_arr[@]} --out peers to increase inbound via ${#t_bringtoout_arr[@]} --in peers to decrease inbound"
 
  local counter=0;
@@ -1032,12 +1038,14 @@ function ab_for_in()
      } || { echo "... send failed"; send=$FALSE; }
 
     date; sleep 1;
-   fi
-   if [[ $SNIPER = $TRUE && $send = $TRUE ]]
-   then
-    echo ".... Sniper Activated - retry"
+    if [[ $SNIPER = $TRUE && $send = $TRUE ]]
+    then
+     date; echo ".... Sniper Activated - retry"; sleep 1;
+    else
+     break;
+    fi
    else
-    break;
+    date; echo ".... No available peers, move on"; break;
    fi
   done
 
@@ -1068,7 +1076,7 @@ function ab_for_in()
    #Exit from While True
    if [[ $SNIPER = $TRUE && $send = $TRUE ]]
    then
-    echo ".... Sniper Activated - retry"
+    date; echo ".... Sniper Activated - retry"; sleep 1;
    else
     break;
    fi
@@ -1081,7 +1089,7 @@ function process_chivo()
  step=${1:-99}
  step_txt=${2:-X}
 
- echo "Step $step:$step_txt ... Increasing inbound for CHIVO"
+ date; echo "Step $step:$step_txt ... Increasing inbound for CHIVO"
 
  MAX_FEE_RATE=$HIGH_MAX_FEE_RATE
  LIMIT_FEE_RATE=$HIGH_LIMIT_FEE_RATE
@@ -1092,7 +1100,7 @@ function process_chivo()
  then
 
   OUT=$CHIVO
-  counter=0
+  local counter=0
 
   check_allow_rebalance "OUT" $OUT || return;
 
@@ -1163,13 +1171,13 @@ function process_loop()
 
   #Add the rest array to increase chances.
   local t_sendtoin_arr=(${sendtoin_arr[@]}); t_sendtoin_arr+=(${zerrofeetoin_arr[@]}); t_sendtoin_arr+=(${zerofeetoout_arr[@]}); t_sendtoin_arr+=(${therest_arr[@]}); t_sendtoin_arr+=(${twoway_arr[@]}); t_sendtoin_arr+=(${bringtoout_arr[@]});
-  echo "Step $step:$step_txt ... Reduce Remote for --in LOOP via ${#t_sendtoin_arr[@]} --out peers"
+  date; echo "Step $step:$step_txt ... Reduce Remote for --in LOOP via ${#t_sendtoin_arr[@]} --out peers"
 
   MAX_FEE_RATE=$LOOP_MAX_FEE_RATE
   LIMIT_FEE_RATE=$LOOP_LIMIT_FEE_RATE
   NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
-  counter=0
+  local counter=0
   IN=$LOOP
 
   check_allow_rebalance "IN" $IN || return;
@@ -1201,7 +1209,7 @@ function process_loop()
 function cleanup()
 {
  #Cleanup
- echo " ... Cleanup"
+ date; echo " ... Cleanup"
  rm -rf $MY_T_DIR
  $BOS clean-failed-payments
 }
@@ -1211,16 +1219,15 @@ function tip()
  #Tip Author
  if [ $TIP -ne 0 ]
  then
-  echo "Thank you... $TIP"
+  date; echo "Thank you... $TIP"
   $BOS send 03c5528c628681aa17ab9e117aa3ee6f06c750dfb17df758ecabcd68f1567ad8c1 --amount $TIP --message "Thank you for rebalancing $MY_KEY"
  fi
 }
 
 function final_sleep()
 {
- sleep_time=6921
- echo "Final Sleep for $sleep_time seconds you can press ctrl-c"
- date;
+ sleep_time=21420
+ date; echo Final Sleep until `date -d "+$sleep_time seconds"` for $sleep_time seconds you can press ctrl-c
  echo "========= SLEEP ========"
  sleep $sleep_time
 }
@@ -1237,9 +1244,9 @@ step_count=0
 
 #all list
 #for run_func in "process_loop" "process_chivo" "ab_for_in" "ab_for_out" "ab_for_2w" "sendtoin_high_local" "ensure_minimum_local" "idle_to_in" "idle_to_out"
-for run_func in "process_loop" "ab_for_in" "ab_for_out" "ab_for_2w"
+for run_func in "process_loop" "ab_for_in" "ab_for_out" "ab_for_2w" "ensure_minimum_local"
 do
- echo "Initialising step ... $step_count : $run_func"
+ date; echo "Initialising step ... $step_count : $run_func"
  if init
  then
   echo "Starting step ... $step_count:$run_func"
