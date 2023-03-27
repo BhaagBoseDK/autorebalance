@@ -64,6 +64,7 @@
 #       - Only rebalance if there was a recent forward.
 #       - Dynamic Rebalance Fee based on OUT channel.
 # 0.2.7 - Minor Changes
+#       - IN,OUT_REBAL targets instead of 100%.
 script_ver=0.2.7
 ##       - <to design> use avoid to rebalance key channels
 #
@@ -109,6 +110,10 @@ OUT_OVER_CAPACITY=0.5
 # Target rebalance to this capacity of Local. Keep this below 0.5 (50%)
 IN_TARGET_OUTBOUND=0.15
 
+# Rebalance Target
+OUT_REBAL=0.21
+IN_REBAL=0.69
+
 # Target rebalance for 2 way channels
 TWO_WAY_TARGET=0.5
 
@@ -126,8 +131,8 @@ gOMIT_IN=" "
 # ab_for_in : peers you prefer to keep remote - increase remote if possible. These will not be use as --in
 
 # Change the tag name here if you have other names for similar purpose you can add multiple with --tag tagname syntax. Make it " " if no tags are required.
-TAG_FOR_OUT="--tag ab_for_out"
-TAG_FOR_IN="--tag ab_for_in"
+TAG_FOR_OUT="--tag ab_for_out --tag fee_a"
+TAG_FOR_IN="--tag ab_for_in --tag fee_z"
 TAG_FOR_2W="--tag ab_for_2w"
 
 #Minimum liquidity required on the direction for rebalance.
@@ -155,8 +160,8 @@ X_FEE_LIMIT=$((D_FEE_LIMIT/2))
 X_FEE=$BASE_FEE
 D_FEE=$((BASE_FEE+200))
 C_FEE=$((BASE_FEE+400))
-B_FEE=$((BASE_FEE+700))
-A_FEE=$((BASE_FEE+1000))
+B_FEE=$((BASE_FEE+800))
+A_FEE=$((BASE_FEE+1600))
 NUDGE_AMOUNT=69420
 NUDGE_FEE=$((NUDGE_AMOUNT*MAX_FEE_RATE/1000000))
 
@@ -943,7 +948,7 @@ function ab_for_out()
     OUT=${zerofeetoin_arr[j]};
     #send a nudge and if success rebalance
     send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
-     { rebalance $OUT $IN "--in-target-outbound CAPACITY" &&
+     { rebalance $OUT $IN "--in-target-outbound CAPACITY*$IN_REBAL" &&
       { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>INBOUND_LIQUIDITY*2169/10000" ||
         { echo "... Peer $OUT depleted ... reinitialise ...";
           init || break 2;
@@ -972,7 +977,7 @@ function ab_for_out()
 
    #send a nudge
    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
-    { rebalance $OUT $IN "--in-target-outbound CAPACITY" &&
+    { rebalance $OUT $IN "--in-target-outbound CAPACITY*$IN)_REBAL" &&
       { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>INBOUND_LIQUIDITY*2169/10000" ||
         { echo "... Peer $OUT depleted ... reinitialise ...";
           init || break 2;
@@ -1029,7 +1034,7 @@ function ab_for_in()
 
     #send a nudge and if success rebalance
     send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
-     { rebalance $OUT $IN "--out-target-inbound CAPACITY" &&
+     { rebalance $OUT $IN "--out-target-inbound CAPACITY*$OUT_REBAL" &&
       { check_peer_capacity $IN "INBOUND_LIQUIDITY>OUTBOUND_LIQUIDITY*2169/10000" ||
         { echo "... Peer $IN depleted ... reinitialise ...";
           init || break 2;
@@ -1064,7 +1069,7 @@ function ab_for_in()
 
    #send a nudge
    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
-    { rebalance $OUT $IN "--out-target-inbound CAPACITY" &&
+    { rebalance $OUT $IN "--out-target-inbound CAPACITY*$OUT_REBAL" &&
       { check_peer_capacity $IN "INBOUND_LIQUIDITY>OUTBOUND_LIQUIDITY*2169/10000" ||
         { echo "... Peer $IN depleted ... reinitialise ...";
           init || break 2;
@@ -1226,7 +1231,7 @@ function tip()
 
 function final_sleep()
 {
- sleep_time=21420
+ sleep_time=69420
  date; echo Final Sleep until `date -d "+$sleep_time seconds"` for $sleep_time seconds you can press ctrl-c
  echo "========= SLEEP ========"
  sleep $sleep_time
@@ -1244,7 +1249,7 @@ step_count=0
 
 #all list
 #for run_func in "process_loop" "process_chivo" "ab_for_in" "ab_for_out" "ab_for_2w" "sendtoin_high_local" "ensure_minimum_local" "idle_to_in" "idle_to_out"
-for run_func in "process_loop" "ab_for_in" "ab_for_out" "ab_for_2w" "ensure_minimum_local"
+for run_func in "process_loop" "ab_for_in" "ab_for_out"
 do
  date; echo "Initialising step ... $step_count : $run_func"
  if init

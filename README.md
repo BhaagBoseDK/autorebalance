@@ -129,4 +129,6 @@ Change History:
        - Append to peers file
        - Only rebalance if there was a recent forward.
        - Dynamic Rebalance Fee based on OUT channel.
+#0.2.7 - Minor Changes
+#      - IN,OUT_REBAL targets instead of 100%.
 ```
