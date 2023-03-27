@@ -65,6 +65,7 @@
 #       - Dynamic Rebalance Fee based on OUT channel.
 # 0.2.7 - Minor Changes
 #       - IN,OUT_REBAL targets instead of 100%.
+# 0.2.8 - WIP
 script_ver=0.2.7
 ##       - <to design> use avoid to rebalance key channels
 #
@@ -111,8 +112,8 @@ OUT_OVER_CAPACITY=0.5
 IN_TARGET_OUTBOUND=0.15
 
 # Rebalance Target
-OUT_REBAL=0.21
-IN_REBAL=0.69
+TG_OUT_REBAL=0.69
+TG_IN_REBAL=0.69
 
 # Target rebalance for 2 way channels
 TWO_WAY_TARGET=0.5
@@ -948,7 +949,7 @@ function ab_for_out()
     OUT=${zerofeetoin_arr[j]};
     #send a nudge and if success rebalance
     send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
-     { rebalance $OUT $IN "--in-target-outbound CAPACITY*$IN_REBAL" &&
+     { rebalance $OUT $IN "--in-target-outbound CAPACITY*$TG_IN_REBAL" &&
       { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>INBOUND_LIQUIDITY*2169/10000" ||
         { echo "... Peer $OUT depleted ... reinitialise ...";
           init || break 2;
@@ -977,7 +978,7 @@ function ab_for_out()
 
    #send a nudge
    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
-    { rebalance $OUT $IN "--in-target-outbound CAPACITY*$IN)_REBAL" &&
+    { rebalance $OUT $IN "--in-target-outbound CAPACITY*$TG_IN_REBAL" &&
       { check_peer_capacity $OUT "OUTBOUND_LIQUIDITY>INBOUND_LIQUIDITY*2169/10000" ||
         { echo "... Peer $OUT depleted ... reinitialise ...";
           init || break 2;
@@ -1034,7 +1035,7 @@ function ab_for_in()
 
     #send a nudge and if success rebalance
     send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
-     { rebalance $OUT $IN "--out-target-inbound CAPACITY*$OUT_REBAL" &&
+     { rebalance $OUT $IN "--out-target-inbound CAPACITY*$TG_OUT_REBAL" &&
       { check_peer_capacity $IN "INBOUND_LIQUIDITY>OUTBOUND_LIQUIDITY*2169/10000" ||
         { echo "... Peer $IN depleted ... reinitialise ...";
           init || break 2;
@@ -1069,7 +1070,7 @@ function ab_for_in()
 
    #send a nudge
    send_to_peer $OUT $IN $((NUDGE_AMOUNT+step)) $NUDGE_FEE $step $step_txt &&
-    { rebalance $OUT $IN "--out-target-inbound CAPACITY*$OUT_REBAL" &&
+    { rebalance $OUT $IN "--out-target-inbound CAPACITY*$TG_OUT_REBAL" &&
       { check_peer_capacity $IN "INBOUND_LIQUIDITY>OUTBOUND_LIQUIDITY*2169/10000" ||
         { echo "... Peer $IN depleted ... reinitialise ...";
           init || break 2;
