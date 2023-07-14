@@ -65,8 +65,8 @@
 #       - Dynamic Rebalance Fee based on OUT channel.
 # 0.2.7 - Minor Changes
 #       - IN,OUT_REBAL targets instead of 100%.
-# 0.2.8 - WIP
-script_ver=0.2.7
+# 0.2.8 - Avoid high fee routes
+script_ver=0.2.8
 ##       - <to design> use avoid to rebalance key channels
 #
 # ------------------------------------------------------------------------------------------------
@@ -582,9 +582,9 @@ function send_to_peer()
   return $FALSE
  fi
 
- date; echo  -e "\n ... $BOS send $MY_KEY --amount $SEND_AMOUNT --avoid FEE_RATE>$LIMIT_FEE_RATE/$IN --avoid $OUT/FEE_RATE>$LIMIT_FEE_RATE --max-fee $MAX_FEE_SEND --out $OUT --in $IN $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE"
+ date; echo  -e "\n ... $BOS send $MY_KEY --avoid-high-fee-routes --amount $SEND_AMOUNT --avoid FEE_RATE>$LIMIT_FEE_RATE/$IN --avoid $OUT/FEE_RATE>$LIMIT_FEE_RATE --max-fee $MAX_FEE_SEND --out $OUT --in $IN $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE"
 
- $BOS send $MY_KEY --amount $SEND_AMOUNT --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee $MAX_FEE_SEND --out $OUT --in $IN $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE
+ $BOS send $MY_KEY --avoid-high-fee-routes --amount $SEND_AMOUNT --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee $MAX_FEE_SEND --out $OUT --in $IN $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE
 }
 
 function rebalance()
@@ -602,9 +602,9 @@ function rebalance()
   return $FALSE
  fi
 
- date; echo -e "\n ... $BOS rebalance --in $IN --out $OUT $TARGET --avoid FEE_RATE>$LIMIT_FEE_RATE/$IN --avoid $OUT/FEE_RATE>$LIMIT_FEE_RATE --max-fee-rate $FEE_RATE --max-fee $FEE $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE"
+ date; echo -e "\n ... $BOS rebalance --avoid-high-fee-routes --in $IN --out $OUT $TARGET --avoid FEE_RATE>$LIMIT_FEE_RATE/$IN --avoid $OUT/FEE_RATE>$LIMIT_FEE_RATE --max-fee-rate $FEE_RATE --max-fee $FEE $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE"
 
- $BOS rebalance --in $IN --out $OUT $TARGET --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $FEE_RATE --max-fee $FEE $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE
+ $BOS rebalance --avoid-high-fee-routes --in $IN --out $OUT $TARGET --avoid "FEE_RATE>$LIMIT_FEE_RATE/$IN" --avoid "$OUT/FEE_RATE>$LIMIT_FEE_RATE" --max-fee-rate $FEE_RATE --max-fee $FEE $AVOID && { init_required=$TRUE; return $TRUE; } || return $FALSE
 }
 
 function random_reconnect()
@@ -628,7 +628,7 @@ function random_nudge()
  then
   date; echo "... Random nudge $OUT No activity bewteen our channel for 30 days. Please review. Love from $MY_KEY"
 
-  $BOS send $IN --amount 1 --max-fee 1 --message "No activity bewteen our channel for $IDLE_DAYS days. Please review. Love from $MY_KEY"
+  $BOS send $IN --avoid-high-fee-routes --amount 1 --max-fee 1 --message "No activity bewteen our channel for $IDLE_DAYS days. Please review. Love from $MY_KEY"
  fi
 }
 
